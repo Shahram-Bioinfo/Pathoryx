@@ -1,16 +1,17 @@
 import {
   Activity, AlertTriangle, FlaskConical,
-  Layers, LayoutDashboard, RefreshCcw,
+  Layers, LayoutDashboard, RefreshCcw, ShieldCheck,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { LiveIndicator } from '../ui/LiveIndicator'
 
 const NAV = [
-  { to: '/',         label: 'Overview',       icon: LayoutDashboard },
-  { to: '/slides',   label: 'Slide Explorer', icon: Layers          },
-  { to: '/queues',   label: 'Queue Monitor',  icon: Activity        },
-  { to: '/failures', label: 'Failure Center', icon: AlertTriangle   },
-  { to: '/recovery', label: 'Recovery Center',icon: RefreshCcw      },
+  { to: '/',           label: 'Overview',         icon: LayoutDashboard },
+  { to: '/slides',     label: 'Slide Explorer',   icon: Layers          },
+  { to: '/queues',     label: 'Queue Monitor',    icon: Activity        },
+  { to: '/failures',   label: 'Failure Center',   icon: AlertTriangle   },
+  { to: '/recovery',   label: 'Recovery Center',  icon: RefreshCcw      },
+  { to: '/operations', label: 'Operations',       icon: ShieldCheck     },
 ]
 
 export function Sidebar() {

@@ -517,6 +517,95 @@ class AuditTrailResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase 10 — Observability & Operational Safety
+# ---------------------------------------------------------------------------
+
+
+class ServiceHealthExtended(BaseModel):
+    runner_id: str
+    service_name: str
+    host_id: str
+    pid: int
+    status: str
+    health_state: str  # healthy | degraded | stale | disconnected
+    heartbeat_age_seconds: Optional[float] = None
+    uptime_seconds: Optional[float] = None
+    started_at: Optional[datetime] = None
+    last_heartbeat_at: Optional[datetime] = None
+    environment: Optional[str] = None
+    service_version: Optional[str] = None
+    queue_pending: int = 0
+    queue_running: int = 0
+    queue_failed: int = 0
+
+
+class ServiceHealthExtendedResponse(BaseModel):
+    services: list[ServiceHealthExtended]
+    stale_threshold_seconds: int
+    as_of: datetime
+
+
+class StuckTriggerItem(BaseModel):
+    trigger_id: int
+    kind: str          # pending_stuck | running_stuck | exhausted
+    severity: str      # warning | critical
+    stage: str
+    target_service: str
+    global_artifact_id: Optional[str] = None
+    stuck_seconds: Optional[float] = None
+    retry_count: int = 0
+    max_retries: int = 3
+    error_message: Optional[str] = None
+    triggered_at: Optional[datetime] = None
+    likely_cause: str
+
+
+class StuckTriggersResponse(BaseModel):
+    items: list[StuckTriggerItem]
+    total: int
+    pending_stuck: int
+    running_stuck: int
+    exhausted: int
+
+
+class OperationalIncident(BaseModel):
+    severity: str      # info | warning | critical
+    category: str
+    title: str
+    detail: str
+    related_ids: list[int] = []
+
+
+class OperationalIncidentsResponse(BaseModel):
+    incidents: list[OperationalIncident]
+    total: int
+    critical_count: int
+    warning_count: int
+    info_count: int
+    as_of: datetime
+
+
+class EnvironmentConfig(BaseModel):
+    environment: str           # development | test | staging | production
+    upload_dry_run: bool
+    c_store_enabled: bool
+    lis_enabled: bool
+    pasnet_enabled: bool
+    upload_peer_ip: Optional[str] = None
+    upload_peer_port: Optional[str] = None
+    sec_dcm_bin: Optional[str] = None
+
+
+class DbHealthResponse(BaseModel):
+    table_sizes: dict[str, int] = {}
+    failed_triggers: int = 0
+    pending_triggers: int = 0
+    oldest_pending_age_seconds: Optional[float] = None
+    recovery_backlog: int = 0
+    as_of: datetime
+
+
+# ---------------------------------------------------------------------------
 # Phase 9 — Artifact investigation
 # ---------------------------------------------------------------------------
 

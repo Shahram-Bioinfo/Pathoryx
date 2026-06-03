@@ -29,6 +29,14 @@ from .schemas import (
     ArtifactInvestigationResponse,
     AuditTrailResponse,
     ConversionResultSummary,
+    DbHealthResponse,
+    EnvironmentConfig,
+    OperationalIncident,
+    OperationalIncidentsResponse,
+    ServiceHealthExtended,
+    ServiceHealthExtendedResponse,
+    StuckTriggerItem,
+    StuckTriggersResponse,
     EventItem,
     EventListResponse,
     ExtractionResultSummary,
@@ -890,6 +898,111 @@ def create_app() -> FastAPI:
             logger.warning("audit_trail: query failed: %s", exc)
             data = {"file_id": file_id, "changes": [], "events": []}
         return AuditTrailResponse(**data)
+
+    # ------------------------------------------------------------------
+    # Phase 10 — Operational observability endpoints
+    # ------------------------------------------------------------------
+
+    @app.get(
+        "/dashboard/api/operations/health",
+        response_model=ServiceHealthExtendedResponse,
+        summary="Extended service health with heartbeat ages and queue depths",
+    )
+    def operations_health(db: DbDep) -> ServiceHealthExtendedResponse:
+        try:
+            rows = q.get_service_health_extended(db)
+        except Exception as exc:
+            logger.warning("operations_health: query failed: %s", exc)
+            rows = []
+        return ServiceHealthExtendedResponse(
+            services=[ServiceHealthExtended(**r) for r in rows],
+            stale_threshold_seconds=q.RUNNER_STALE_THRESHOLD_SECONDS,
+            as_of=datetime.now(tz=timezone.utc),
+        )
+
+    @app.get(
+        "/dashboard/api/operations/stuck-triggers",
+        response_model=StuckTriggersResponse,
+        summary="Detect triggers stuck in pending or running state",
+    )
+    def operations_stuck_triggers(
+        db: DbDep,
+        pending_threshold_minutes: Annotated[int, Query(ge=1, le=120)] = q.STUCK_PENDING_THRESHOLD_MINUTES,
+        running_threshold_minutes: Annotated[int, Query(ge=1, le=480)] = q.STUCK_RUNNING_THRESHOLD_MINUTES,
+    ) -> StuckTriggersResponse:
+        try:
+            items = q.get_stuck_triggers(
+                db,
+                pending_threshold_minutes=pending_threshold_minutes,
+                running_threshold_minutes=running_threshold_minutes,
+            )
+        except Exception as exc:
+            logger.warning("operations_stuck_triggers: query failed: %s", exc)
+            items = []
+        return StuckTriggersResponse(
+            items=[StuckTriggerItem(**i) for i in items],
+            total=len(items),
+            pending_stuck=sum(1 for i in items if i["kind"] == "pending_stuck"),
+            running_stuck=sum(1 for i in items if i["kind"] == "running_stuck"),
+            exhausted=sum(1 for i in items if i["kind"] == "exhausted"),
+        )
+
+    @app.get(
+        "/dashboard/api/operations/incidents",
+        response_model=OperationalIncidentsResponse,
+        summary="Operational incident surface — severity-sorted warnings",
+    )
+    def operations_incidents(db: DbDep) -> OperationalIncidentsResponse:
+        try:
+            service_health = q.get_service_health_extended(db)
+        except Exception as exc:
+            logger.warning("operations_incidents: health query failed: %s", exc)
+            service_health = []
+        try:
+            stuck = q.get_stuck_triggers(db)
+        except Exception as exc:
+            logger.warning("operations_incidents: stuck trigger query failed: %s", exc)
+            stuck = []
+        try:
+            db_health = q.get_db_health_metrics(db)
+        except Exception as exc:
+            logger.warning("operations_incidents: db_health query failed: %s", exc)
+            db_health = {"failed_triggers": 0, "recovery_backlog": 0}
+        env_cfg = q.get_environment_config()
+
+        incidents = q.build_operational_incidents(service_health, stuck, db_health, env_cfg)
+        now = datetime.now(tz=timezone.utc)
+        return OperationalIncidentsResponse(
+            incidents=[OperationalIncident(**i) for i in incidents],
+            total=len(incidents),
+            critical_count=sum(1 for i in incidents if i["severity"] == "critical"),
+            warning_count=sum(1 for i in incidents if i["severity"] == "warning"),
+            info_count=sum(1 for i in incidents if i["severity"] == "info"),
+            as_of=now,
+        )
+
+    @app.get(
+        "/dashboard/api/operations/environment",
+        response_model=EnvironmentConfig,
+        summary="Environment and operational safety configuration",
+    )
+    def operations_environment() -> EnvironmentConfig:
+        cfg = q.get_environment_config()
+        return EnvironmentConfig(**cfg)
+
+    @app.get(
+        "/dashboard/api/operations/db-health",
+        response_model=DbHealthResponse,
+        summary="Database table sizes and health metrics",
+    )
+    def operations_db_health(db: DbDep) -> DbHealthResponse:
+        try:
+            metrics = q.get_db_health_metrics(db)
+        except Exception as exc:
+            logger.warning("operations_db_health: query failed: %s", exc)
+            metrics = {"table_sizes": {}, "failed_triggers": 0, "pending_triggers": 0,
+                       "oldest_pending_age_seconds": None, "recovery_backlog": 0}
+        return DbHealthResponse(**metrics, as_of=datetime.now(tz=timezone.utc))
 
     # ------------------------------------------------------------------
     # GET /dashboard/api/services/health

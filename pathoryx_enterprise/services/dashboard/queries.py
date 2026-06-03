@@ -29,9 +29,14 @@ from pathoryx_enterprise.db.models.events import PipelineEvent
 from pathoryx_enterprise.db.models.failed_watcher import TechnicianChange, WatchedFolderSnapshot
 from pathoryx_enterprise.db.models.qc import QCResult
 from pathoryx_enterprise.db.models.uploader import UploadResult
+from pathoryx_enterprise.utils.datetime_utils import utc_now
 
 # How many seconds of silence before a runner is considered stale.
 RUNNER_STALE_THRESHOLD_SECONDS = 120
+
+# Stuck-trigger detection thresholds.
+STUCK_PENDING_THRESHOLD_MINUTES  = 15   # pending this long → no worker consuming
+STUCK_RUNNING_THRESHOLD_MINUTES  = 60   # running this long  → likely deadlocked
 
 
 # ---------------------------------------------------------------------------
@@ -989,6 +994,433 @@ def get_artifact_investigation(
         "failure_groups":     build_failure_groups(triggers),
         "path_lineage":       build_path_lineage(record, conv, upl, recovery),
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 — Observability, Safety & Operational Stability
+# ---------------------------------------------------------------------------
+
+
+def get_service_health_extended(session: Session) -> list[dict]:
+    """
+    Return RunnerRegistrations enriched with heartbeat age, health state,
+    and per-service queue depth.
+
+    Health states:
+      healthy      < 60 s since last heartbeat
+      degraded     60–120 s
+      stale        120–300 s
+      disconnected > 300 s
+    """
+    now = utc_now()
+    runners = session.execute(
+        select(RunnerRegistration).order_by(
+            RunnerRegistration.service_name,
+            RunnerRegistration.last_heartbeat_at.desc(),
+        )
+    ).scalars().all()
+
+    # Per-service queue counts in one aggregated query
+    trigger_rows = session.execute(
+        select(
+            ServiceTrigger.target_service,
+            ServiceTrigger.trigger_status,
+            func.count().label("cnt"),
+        ).group_by(ServiceTrigger.target_service, ServiceTrigger.trigger_status)
+    ).all()
+
+    queue: dict[str, dict[str, int]] = {}
+    for r in trigger_rows:
+        svc = r.target_service or "unknown"
+        st  = r.trigger_status  or "unknown"
+        queue.setdefault(svc, {})[st] = r.cnt
+
+    result = []
+    for r in runners:
+        age_s = (now - r.last_heartbeat_at).total_seconds() if r.last_heartbeat_at else None
+
+        if age_s is None:
+            state = "disconnected"
+        elif age_s < 60:
+            state = "healthy"
+        elif age_s < RUNNER_STALE_THRESHOLD_SECONDS:
+            state = "degraded"
+        elif age_s < 300:
+            state = "stale"
+        else:
+            state = "disconnected"
+
+        svc_q = queue.get(r.service_name, {})
+        uptime_s = (now - r.started_at).total_seconds() if r.started_at else None
+
+        result.append({
+            "runner_id":            r.runner_id,
+            "service_name":         r.service_name,
+            "host_id":              r.host_id,
+            "pid":                  r.pid,
+            "status":               r.status,
+            "health_state":         state,
+            "heartbeat_age_seconds": round(age_s, 1) if age_s is not None else None,
+            "uptime_seconds":       round(uptime_s, 0) if uptime_s is not None else None,
+            "started_at":           r.started_at,
+            "last_heartbeat_at":    r.last_heartbeat_at,
+            "environment":          r.environment,
+            "service_version":      r.service_version,
+            "queue_pending":        svc_q.get("pending", 0),
+            "queue_running":        svc_q.get("running", 0),
+            "queue_failed":         svc_q.get("failed", 0),
+        })
+
+    return result
+
+
+def get_stuck_triggers(
+    session: Session,
+    pending_threshold_minutes: int = STUCK_PENDING_THRESHOLD_MINUTES,
+    running_threshold_minutes: int = STUCK_RUNNING_THRESHOLD_MINUTES,
+) -> list[dict]:
+    """
+    Detect triggers that are:
+      - pending  too long  (service not consuming — worker may be down)
+      - running  too long  (execution hanging — likely deadlocked)
+      - exhausted          (retry_count >= max_retries AND failed)
+
+    Returns a list of dicts ordered by severity then age, for direct UI rendering.
+    """
+    now = utc_now()
+    pending_cutoff = now - timedelta(minutes=pending_threshold_minutes)
+    running_cutoff = now - timedelta(minutes=running_threshold_minutes)
+
+    # Pending too long
+    pending_stuck = session.execute(
+        select(ServiceTrigger)
+        .where(ServiceTrigger.trigger_status == "pending")
+        .where(ServiceTrigger.triggered_at < pending_cutoff)
+        .order_by(ServiceTrigger.triggered_at.asc())
+        .limit(50)
+    ).scalars().all()
+
+    # Running too long
+    running_stuck = session.execute(
+        select(ServiceTrigger)
+        .where(ServiceTrigger.trigger_status == "running")
+        .where(ServiceTrigger.started_at < running_cutoff)
+        .order_by(ServiceTrigger.started_at.asc())
+        .limit(50)
+    ).scalars().all()
+
+    # Exhausted retries
+    exhausted = session.execute(
+        select(ServiceTrigger)
+        .where(ServiceTrigger.trigger_status == "failed")
+        .where(ServiceTrigger.retry_count >= ServiceTrigger.max_retries)
+        .order_by(ServiceTrigger.triggered_at.desc())
+        .limit(50)
+    ).scalars().all()
+
+    def _age_s(ts) -> float | None:
+        if ts is None:
+            return None
+        return round((now - ts).total_seconds(), 1)
+
+    items = []
+    for t in pending_stuck:
+        items.append({
+            "trigger_id":     t.internal_id,
+            "kind":           "pending_stuck",
+            "severity":       "warning",
+            "stage":          t.stage_name,
+            "target_service": t.target_service,
+            "global_artifact_id": t.global_artifact_id,
+            "stuck_seconds":  _age_s(t.triggered_at),
+            "retry_count":    t.retry_count,
+            "max_retries":    t.max_retries,
+            "error_message":  t.error_message,
+            "triggered_at":   t.triggered_at,
+            "likely_cause":   "No active worker consuming this stage — service may be down or overloaded",
+        })
+
+    for t in running_stuck:
+        items.append({
+            "trigger_id":     t.internal_id,
+            "kind":           "running_stuck",
+            "severity":       "critical",
+            "stage":          t.stage_name,
+            "target_service": t.target_service,
+            "global_artifact_id": t.global_artifact_id,
+            "stuck_seconds":  _age_s(t.started_at),
+            "retry_count":    t.retry_count,
+            "max_retries":    t.max_retries,
+            "error_message":  t.error_message,
+            "triggered_at":   t.triggered_at,
+            "likely_cause":   "Execution has not completed — worker may be hung or the task timed out",
+        })
+
+    for t in exhausted:
+        items.append({
+            "trigger_id":     t.internal_id,
+            "kind":           "exhausted",
+            "severity":       "critical",
+            "stage":          t.stage_name,
+            "target_service": t.target_service,
+            "global_artifact_id": t.global_artifact_id,
+            "stuck_seconds":  _age_s(t.triggered_at),
+            "retry_count":    t.retry_count,
+            "max_retries":    t.max_retries,
+            "error_message":  t.error_message,
+            "triggered_at":   t.triggered_at,
+            "likely_cause":   f"Retry limit exhausted ({t.retry_count}/{t.max_retries}) — manual intervention required",
+        })
+
+    # Deduplicate by trigger_id (a trigger could appear in multiple lists in edge cases)
+    seen: set[int] = set()
+    unique: list[dict] = []
+    for item in items:
+        tid = item["trigger_id"]
+        if tid not in seen:
+            seen.add(tid)
+            unique.append(item)
+
+    # Sort: critical first, then oldest
+    unique.sort(key=lambda i: (0 if i["severity"] == "critical" else 1, -(i["stuck_seconds"] or 0)))
+    return unique
+
+
+def get_db_health_metrics(session: Session) -> dict:
+    """
+    Surface DB health metrics without heavy table scans.
+
+    Uses pg_stat_user_tables for approximate live row counts (maintained by
+    autovacuum, updated within ~minutes).  Exact failed/pending counts use
+    indexed queries and are fast even on large tables.
+    """
+    # Approximate table sizes from PG autovacuum statistics
+    size_stmt = text("""
+        SELECT schemaname || '.' || relname AS tbl, n_live_tup::bigint AS approx_rows
+        FROM pg_stat_user_tables
+        WHERE (schemaname, relname) IN (
+            ('core',          'service_trigger'),
+            ('events',        'pipeline_events'),
+            ('core',          'file_records'),
+            ('failed_watcher','technician_changes'),
+            ('failed_watcher','watched_folder_snapshots')
+        )
+    """)
+    size_rows = session.execute(size_stmt).mappings().all()
+    table_sizes = {r["tbl"]: int(r["approx_rows"]) for r in size_rows}
+
+    # Exact failed trigger count (uses ix_trigger_dequeue index)
+    failed_triggers: int = session.execute(
+        select(func.count()).select_from(ServiceTrigger)
+        .where(ServiceTrigger.trigger_status == "failed")
+    ).scalar() or 0
+
+    # Pending trigger count
+    pending_triggers: int = session.execute(
+        select(func.count()).select_from(ServiceTrigger)
+        .where(ServiceTrigger.trigger_status == "pending")
+    ).scalar() or 0
+
+    # Age of oldest pending trigger (uses triggered_at index)
+    oldest_pending_ts = session.execute(
+        select(func.min(ServiceTrigger.triggered_at))
+        .where(ServiceTrigger.trigger_status == "pending")
+    ).scalar()
+
+    oldest_pending_age = None
+    if oldest_pending_ts:
+        oldest_pending_age = round((utc_now() - oldest_pending_ts).total_seconds(), 0)
+
+    # Recovery backlog (technician_changes not yet resolved)
+    recovery_backlog: int = session.execute(
+        select(func.count()).select_from(TechnicianChange)
+        .where(TechnicianChange.review_status.in_(["detected", "unlinked", "investigating"]))
+    ).scalar() or 0
+
+    return {
+        "table_sizes":            table_sizes,
+        "failed_triggers":        failed_triggers,
+        "pending_triggers":       pending_triggers,
+        "oldest_pending_age_seconds": oldest_pending_age,
+        "recovery_backlog":       recovery_backlog,
+    }
+
+
+def get_environment_config() -> dict:
+    """
+    Read environment and safety configuration from environment variables and
+    config files.
+
+    Never raises — returns safe defaults on any read failure.  Called by the
+    operations endpoint; result should be cached at the call site if needed.
+    """
+    import os
+    import yaml
+
+    env = os.environ.get("PATHORYX_ENVIRONMENT", "development").lower()
+
+    # Defaults — all safe
+    cfg: dict = {
+        "environment":           env,
+        "upload_dry_run":        True,
+        "c_store_enabled":       False,
+        "lis_enabled":           False,
+        "pasnet_enabled":        False,
+        "upload_peer_ip":        None,
+        "upload_peer_port":      None,
+        "sec_dcm_bin":           None,
+    }
+
+    # DICOM config → upload mode + C-STORE + LIS
+    dicom_path = (
+        os.environ.get("DICOM_CONFIG_PATH")
+        or os.environ.get("DICOM_CONFIG")
+        or "configs/dicom_config.yaml"
+    )
+    try:
+        with open(dicom_path) as fh:
+            dicom_cfg = yaml.safe_load(fh) or {}
+        upload_cfg = dicom_cfg.get("upload", {}) or {}
+        cstore_cfg = dicom_cfg.get("cstore", {}) or {}
+        lis_cfg    = dicom_cfg.get("lis", {}) or {}
+        cfg["upload_dry_run"]   = bool(upload_cfg.get("dry_run", True))
+        cfg["c_store_enabled"]  = bool(cstore_cfg.get("upload_via_c_store", False))
+        cfg["lis_enabled"]      = bool(lis_cfg.get("enabled", False))
+        cfg["upload_peer_ip"]   = cstore_cfg.get("peer_ip")
+        cfg["upload_peer_port"] = str(cstore_cfg.get("default_peer_port", "")) or None
+        cfg["sec_dcm_bin"]      = cstore_cfg.get("sec_dcm_bin")
+    except Exception:
+        pass
+
+    # BabelShark config → PASNET
+    babel_path = (
+        os.environ.get("BABELSHARK_CONFIG_PATH")
+        or os.environ.get("BABELSHARK_CONFIG")
+        or "configs/babelshark_config.yaml"
+    )
+    try:
+        with open(babel_path) as fh:
+            babel_cfg = yaml.safe_load(fh) or {}
+        pasnet_cfg = babel_cfg.get("pasnet_validator", {}) or {}
+        cfg["pasnet_enabled"] = bool(pasnet_cfg.get("enabled", False))
+    except Exception:
+        pass
+
+    return cfg
+
+
+def build_operational_incidents(
+    service_health: list[dict],
+    stuck_triggers: list[dict],
+    db_health: dict,
+    env_cfg: dict,
+) -> list[dict]:
+    """
+    Generate the operational incident list from collected health signals.
+
+    Severity levels: info | warning | critical
+    Each incident has: severity, category, title, detail, related_ids
+
+    Incidents are sorted: critical first, then warning, then info.
+    """
+    incidents: list[dict] = []
+
+    def _add(severity: str, category: str, title: str, detail: str, related=None):
+        incidents.append({
+            "severity": severity,
+            "category": category,
+            "title":    title,
+            "detail":   detail,
+            "related_ids": related or [],
+        })
+
+    # ── Service health ───────────────────────────────────────────────────────
+    for svc in service_health:
+        state = svc.get("health_state")
+        name  = svc.get("service_name", "unknown")
+        age   = svc.get("heartbeat_age_seconds")
+        age_s = f"{age:.0f}s" if age is not None else "unknown"
+
+        if state == "stale":
+            _add("warning", "service_health",
+                 f"{name} heartbeat stale",
+                 f"Last heartbeat was {age_s} ago — service may be degraded")
+        elif state == "disconnected":
+            _add("critical", "service_health",
+                 f"{name} disconnected",
+                 f"No heartbeat for {age_s} — service appears down or crashed")
+
+    # ── Stuck triggers ───────────────────────────────────────────────────────
+    pending_stuck = [t for t in stuck_triggers if t["kind"] == "pending_stuck"]
+    running_stuck = [t for t in stuck_triggers if t["kind"] == "running_stuck"]
+    exhausted     = [t for t in stuck_triggers if t["kind"] == "exhausted"]
+
+    if pending_stuck:
+        svc = pending_stuck[0]["target_service"]
+        oldest = max(t["stuck_seconds"] or 0 for t in pending_stuck)
+        _add("warning", "stuck_trigger",
+             f"{len(pending_stuck)} trigger(s) stuck in pending ({svc})",
+             f"Oldest has been pending {oldest:.0f}s — worker may be down",
+             [t["trigger_id"] for t in pending_stuck])
+
+    if running_stuck:
+        oldest = max(t["stuck_seconds"] or 0 for t in running_stuck)
+        _add("critical", "stuck_trigger",
+             f"{len(running_stuck)} trigger(s) running too long",
+             f"Execution has not completed after {oldest:.0f}s — possible deadlock",
+             [t["trigger_id"] for t in running_stuck])
+
+    if exhausted:
+        _add("critical", "exhausted_retry",
+             f"{len(exhausted)} trigger(s) exhausted retries",
+             "Manual intervention required — artifacts will not progress automatically",
+             [t["trigger_id"] for t in exhausted])
+
+    # ── Upload safety ────────────────────────────────────────────────────────
+    environment = env_cfg.get("environment", "development")
+    is_prod     = environment in ("production", "prod")
+    dry_run     = env_cfg.get("upload_dry_run", True)
+    c_store     = env_cfg.get("c_store_enabled", False)
+
+    if dry_run:
+        _add("info", "upload_mode",
+             "Upload dry-run active",
+             "Slides are processed but NOT delivered to PACS — upload.dry_run=true")
+    elif c_store and is_prod:
+        _add("info", "upload_mode",
+             "Live PACS delivery active",
+             "C-STORE upload is enabled and environment is production")
+    elif c_store and not is_prod:
+        _add("warning", "upload_mode",
+             "Live C-STORE enabled in non-production environment",
+             f"Environment is '{environment}' but upload.dry_run=false — check before running")
+
+    # ── Recovery backlog ─────────────────────────────────────────────────────
+    backlog = db_health.get("recovery_backlog", 0)
+    if backlog > 20:
+        _add("warning", "recovery_backlog",
+             f"Recovery backlog: {backlog} unresolved",
+             "Many technician-change records are pending review — manual action may be needed")
+    elif backlog > 50:
+        _add("critical", "recovery_backlog",
+             f"Recovery backlog critical: {backlog} items",
+             "Technician review queue is overloaded — assign operators to clear the backlog")
+
+    # ── Failed trigger accumulation ──────────────────────────────────────────
+    failed = db_health.get("failed_triggers", 0)
+    if failed > 10:
+        _add("warning", "failed_triggers",
+             f"Failed trigger accumulation: {failed}",
+             "More than 10 failed triggers — investigate via Failure Center")
+    elif failed > 50:
+        _add("critical", "failed_triggers",
+             f"Critical failed trigger count: {failed}",
+             "Systematic pipeline failure — investigate root cause immediately")
+
+    # ── Sort by severity ─────────────────────────────────────────────────────
+    order = {"critical": 0, "warning": 1, "info": 2}
+    incidents.sort(key=lambda i: order.get(i["severity"], 9))
+    return incidents
 
 
 def get_artifact_audit_trail(session: Session, file_id: int) -> dict:

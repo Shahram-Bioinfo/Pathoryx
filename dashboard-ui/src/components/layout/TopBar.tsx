@@ -4,6 +4,7 @@ import { Moon, RefreshCw, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTheme } from './ThemeProvider'
 import { useSSE } from '../../hooks/useSSE'
+import { useEnvironmentConfig } from '../../hooks/useOperations'
 
 // ── Mission clock ─────────────────────────────────────────────────────────────
 
@@ -104,6 +105,30 @@ function SseIndicator() {
 
 // ── TopBar ────────────────────────────────────────────────────────────────────
 
+function EnvironmentChip() {
+  const { data: env } = useEnvironmentConfig()
+  if (!env) return null
+
+  const isProd     = env.environment === 'production' || env.environment === 'prod'
+  const isDryRun   = env.upload_dry_run
+  const color      = isProd ? 'var(--chart-rose)' : 'var(--chart-amber)'
+  const bg         = isProd ? 'rgba(225,29,72,0.07)' : 'rgba(217,119,6,0.07)'
+  const border     = isProd ? 'rgba(225,29,72,0.20)' : 'rgba(217,119,6,0.20)'
+
+  return (
+    <span
+      className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-semibold uppercase tracking-[0.15em]"
+      style={{ color, background: bg, border: `1px solid ${border}` }}
+      title={`Environment: ${env.environment} — Upload: ${isDryRun ? 'dry-run' : 'LIVE'}`}
+    >
+      {env.environment.slice(0, 4).toUpperCase()}
+      {isDryRun
+        ? <span style={{ color: 'var(--chart-teal)', fontSize: '8px' }}>DRY</span>
+        : <span style={{ color: 'var(--chart-rose)', fontSize: '8px' }}>LIVE</span>}
+    </span>
+  )
+}
+
 export function TopBar() {
   const { theme, toggle } = useTheme()
   const qc = useQueryClient()
@@ -123,6 +148,15 @@ export function TopBar() {
       <div className="flex-1" />
 
       <div className="flex items-center gap-3">
+        {/* Environment + upload mode chip — always visible */}
+        <EnvironmentChip />
+
+        <div
+          className="h-3.5 w-px hidden sm:block"
+          style={{ background: 'var(--border-default)' }}
+          aria-hidden
+        />
+
         <MissionClock />
 
         <div

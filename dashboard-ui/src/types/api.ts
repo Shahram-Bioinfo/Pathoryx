@@ -428,6 +428,95 @@ export interface AuditTrailResponse {
   events: AuditEventItem[]
 }
 
+// ---- Phase 10 — Observability & Safety ----
+
+export interface ServiceHealthExtended {
+  runner_id: string
+  service_name: string
+  host_id: string
+  pid: number
+  status: string
+  /** healthy | degraded | stale | disconnected */
+  health_state: string
+  heartbeat_age_seconds: number | null
+  uptime_seconds: number | null
+  started_at: string | null
+  last_heartbeat_at: string | null
+  environment: string | null
+  service_version: string | null
+  queue_pending: number
+  queue_running: number
+  queue_failed: number
+}
+
+export interface ServiceHealthExtendedResponse {
+  services: ServiceHealthExtended[]
+  stale_threshold_seconds: number
+  as_of: string
+}
+
+export interface StuckTriggerItem {
+  trigger_id: number
+  /** pending_stuck | running_stuck | exhausted */
+  kind: string
+  /** warning | critical */
+  severity: string
+  stage: string
+  target_service: string
+  global_artifact_id: string | null
+  stuck_seconds: number | null
+  retry_count: number
+  max_retries: number
+  error_message: string | null
+  triggered_at: string | null
+  likely_cause: string
+}
+
+export interface StuckTriggersResponse {
+  items: StuckTriggerItem[]
+  total: number
+  pending_stuck: number
+  running_stuck: number
+  exhausted: number
+}
+
+export interface OperationalIncident {
+  severity: 'info' | 'warning' | 'critical'
+  category: string
+  title: string
+  detail: string
+  related_ids: number[]
+}
+
+export interface OperationalIncidentsResponse {
+  incidents: OperationalIncident[]
+  total: number
+  critical_count: number
+  warning_count: number
+  info_count: number
+  as_of: string
+}
+
+export interface EnvironmentConfig {
+  environment: string
+  upload_dry_run: boolean
+  c_store_enabled: boolean
+  lis_enabled: boolean
+  pasnet_enabled: boolean
+  upload_peer_ip: string | null
+  upload_peer_port: string | null
+  sec_dcm_bin: string | null
+}
+
+export interface DbHealthResponse {
+  table_sizes: Record<string, number>
+  failed_triggers: number
+  pending_triggers: number
+  oldest_pending_age_seconds: number | null
+  recovery_backlog: number
+  as_of: string
+}
+
 // ---- Phase 9 — Artifact investigation ----
 
 export interface RetryChainItem {

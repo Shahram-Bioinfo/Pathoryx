@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Shell } from './components/layout/Shell'
 import { ThemeProvider } from './components/layout/ThemeProvider'
 import { FailureCenter } from './pages/FailureCenter'
+import { OperationsCenter } from './pages/OperationsCenter'
 import { Overview } from './pages/Overview'
 import { QueueMonitor } from './pages/QueueMonitor'
 import { RecoveryCenter } from './pages/RecoveryCenter'
@@ -31,6 +32,7 @@ export default function App() {
               <Route path="/queues"              element={<QueueMonitor />} />
               <Route path="/failures"            element={<FailureCenter />} />
               <Route path="/recovery"            element={<RecoveryCenter />} />
+              <Route path="/operations"          element={<OperationsCenter />} />
             </Routes>
           </Shell>
         </BrowserRouter>

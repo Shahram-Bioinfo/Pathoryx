@@ -38,13 +38,14 @@ const SSE_URL = '/dashboard/api/stream'
  * because we want every cached variant to refresh.
  */
 const EVENT_INVALIDATIONS: Readonly<Record<string, readonly string[][]>> = {
-  queue_updated:           [['queues'], ['overview']],
+  queue_updated:           [['queues'], ['overview'], ['operations']],
   // 'slide' prefix matches all ['slide', artifactId] keys (React Query prefix semantics)
   // 'artifactInvestigation' refreshes the Phase 9 investigation page
   file_record_updated:     [['overview'], ['slides'], ['slide'], ['artifactInvestigation']],
   pipeline_event_created:  [['events'], ['overview'], ['slide'], ['artifactInvestigation']],
   recovery_event_created:  [['recovery'], ['failures'], ['slide'], ['artifactInvestigation'], ['auditTrail']],
-  service_health_updated:  [['services-health']],
+  // service_health_updated refreshes service health AND operations center (Phase 10)
+  service_health_updated:  [['services-health'], ['operations']],
 }
 
 /** Debounce window.  Multiple events for the same key within this window
