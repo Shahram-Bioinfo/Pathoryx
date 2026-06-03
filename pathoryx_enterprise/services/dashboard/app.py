@@ -26,6 +26,7 @@ from . import sse as _sse
 from . import queries as q
 from .actions import ActionError, execute_technician_rename, update_review_state, validate_filename_structured
 from .schemas import (
+    ArtifactInvestigationResponse,
     AuditTrailResponse,
     ConversionResultSummary,
     EventItem,
@@ -33,9 +34,13 @@ from .schemas import (
     ExtractionResultSummary,
     FailedSlideItem,
     FailedTriggerItem,
+    FailureGroup,
     FilenameValidationRequest,
     FilenameValidationResponse,
     FailuresResponse,
+    PathLineageItem,
+    QueueMetric,
+    RetryChainItem,
     LabelPreviewResponse,
     MonitoredFileItem,
     MonitoredFilesResponse,
@@ -374,6 +379,72 @@ def create_app() -> FastAPI:
             triggers=trigger_rows,
             recovery_events=recovery_rows,
             extraction_result=extraction,
+        )
+
+    # ------------------------------------------------------------------
+    # GET /dashboard/api/artifacts/{global_artifact_id}/investigation
+    # Phase 9 — consolidated investigation endpoint
+    # ------------------------------------------------------------------
+    @app.get(
+        "/dashboard/api/artifacts/{global_artifact_id}/investigation",
+        response_model=ArtifactInvestigationResponse,
+        summary="Full artifact investigation bundle",
+        description=(
+            "Returns all artifact data in one optimised query: triggers, events, "
+            "recovery history, stage results plus server-computed intelligence layers "
+            "(retry chains, queue metrics, failure groups, path lineage)."
+        ),
+    )
+    def artifact_investigation(
+        db: DbDep,
+        global_artifact_id: str,
+        events_limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> ArtifactInvestigationResponse:
+        try:
+            bundle = q.get_artifact_investigation(
+                db,
+                global_artifact_id,
+                events_limit=events_limit,
+            )
+        except SQLAlchemyError as exc:
+            logger.warning("artifact_investigation: query failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Database query failed") from exc
+
+        if bundle is None:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        fr = bundle["file_record"]
+
+        def _qc():
+            row = bundle["qc_result"]
+            return QCResultSummary.model_validate(row) if row else None
+
+        def _conv():
+            row = bundle["conversion_result"]
+            return ConversionResultSummary.model_validate(row) if row else None
+
+        def _upl():
+            row = bundle["upload_result"]
+            return UploadResultSummary.model_validate(row) if row else None
+
+        def _ext():
+            row = bundle["extraction_result"]
+            return ExtractionResultSummary.model_validate(row) if row else None
+
+        return ArtifactInvestigationResponse(
+            file_record=SlideItem.model_validate(fr),
+            qc_result=_qc(),
+            conversion_result=_conv(),
+            upload_result=_upl(),
+            extraction_result=_ext(),
+            triggers=[TriggerItem.model_validate(t) for t in bundle["triggers"]],
+            recovery_events=[RecoveryEventItem.model_validate(r) for r in bundle["recovery_events"]],
+            recent_events=[EventItem.model_validate(e) for e in bundle["events"]],
+            events_total=bundle["events_total"],
+            retry_chains=[RetryChainItem(**rc) for rc in bundle["retry_chains"]],
+            queue_metrics=[QueueMetric(**qm) for qm in bundle["queue_metrics"]],
+            failure_groups=[FailureGroup(**fg) for fg in bundle["failure_groups"]],
+            path_lineage=[PathLineageItem(**pl) for pl in bundle["path_lineage"]],
         )
 
     # ------------------------------------------------------------------

@@ -39,9 +39,11 @@ const SSE_URL = '/dashboard/api/stream'
  */
 const EVENT_INVALIDATIONS: Readonly<Record<string, readonly string[][]>> = {
   queue_updated:           [['queues'], ['overview']],
-  file_record_updated:     [['overview'], ['slides']],
-  pipeline_event_created:  [['events'], ['overview']],
-  recovery_event_created:  [['recovery'], ['failures']],
+  // 'slide' prefix matches all ['slide', artifactId] keys (React Query prefix semantics)
+  // 'artifactInvestigation' refreshes the Phase 9 investigation page
+  file_record_updated:     [['overview'], ['slides'], ['slide'], ['artifactInvestigation']],
+  pipeline_event_created:  [['events'], ['overview'], ['slide'], ['artifactInvestigation']],
+  recovery_event_created:  [['recovery'], ['failures'], ['slide'], ['artifactInvestigation'], ['auditTrail']],
   service_health_updated:  [['services-health']],
 }
 

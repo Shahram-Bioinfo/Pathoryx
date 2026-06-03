@@ -4,13 +4,14 @@ import {
   ArrowLeft, ChevronDown, ChevronRight,
   CheckCircle2, XCircle, AlertTriangle, RefreshCcw,
   FlaskConical, ShieldCheck, Microscope, Send, HardDrive,
+  Route, Gauge,
   type LucideIcon,
 } from 'lucide-react'
 import { ErrorBanner } from '../components/ui/ErrorBanner'
 import { EventStream } from '../components/ui/EventStream'
 import { PageLoader } from '../components/ui/LoadingSpinner'
 import { StatusBadge } from '../components/ui/StatusBadge'
-import { useSlideDetail } from '../hooks/useSlideDetail'
+import { useArtifactInvestigation } from '../hooks/useArtifactInvestigation'
 import type {
   TriggerItem,
   RecoveryEventItem,
@@ -18,6 +19,10 @@ import type {
   QCResultSummary,
   ConversionResultSummary,
   UploadResultSummary,
+  RetryChainItem,
+  QueueMetric,
+  FailureGroup,
+  PathLineageItem,
 } from '../types/api'
 import {
   fmtBytes, fmtDatetime, fmtDuration, fmtRelative,
@@ -922,14 +927,379 @@ function UploadResultBlock({ upl }: { upl: UploadResultSummary }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// PHASE 9 COMPONENTS
+// ════════════════════════════════════════════════════════════════════════
+
+// ── Failure category colours and labels ──────────────────────────────────
+
+const FAILURE_CAT_COLOR: Record<string, string> = {
+  transient:      'var(--chart-amber)',
+  validation:     'var(--chart-rose)',
+  infrastructure: 'var(--chart-rose)',
+  network:        'var(--chart-rose)',
+  parser:         'var(--chart-amber)',
+  unknown:        'var(--text-faint)',
+}
+
+const FAILURE_CAT_LABEL: Record<string, string> = {
+  transient:      'Transient',
+  validation:     'Validation',
+  infrastructure: 'Infrastructure',
+  network:        'Network / PACS',
+  parser:         'Parser / Label',
+  unknown:        'Unknown',
+}
+
+// ── Retry chain visualization ─────────────────────────────────────────────
+
+function RetryChainSection({ chains, triggers }: { chains: RetryChainItem[]; triggers: TriggerItem[] }) {
+  if (!chains.length) return null
+
+  const hasRetries = chains.some(c => c.total_retries > 0)
+  const hasFailed  = chains.some(c => c.final_outcome === 'failed')
+  if (!hasRetries && !hasFailed) return null  // nothing interesting to show
+
+  const triggerById = new Map(triggers.map(t => [t.internal_id, t]))
+
+  return (
+    <div>
+      {chains
+        .filter(c => c.total_retries > 0 || c.final_outcome === 'failed')
+        .map(chain => {
+          const chainTriggers = chain.trigger_ids
+            .map(id => triggerById.get(id))
+            .filter(Boolean) as TriggerItem[]
+          const catColor = FAILURE_CAT_COLOR[chain.failure_category ?? 'unknown']
+
+          return (
+            <div
+              key={chain.stage}
+              className="mb-3 rounded-lg overflow-hidden"
+              style={{ border: `1px solid ${catColor}22` }}
+            >
+              {/* Stage header */}
+              <div
+                className="flex items-center gap-2.5 px-3 py-2"
+                style={{ background: `${catColor}09`, borderBottom: '1px solid var(--border-faint)' }}
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: catColor }}>
+                  {fmtStageName(chain.stage)}
+                </span>
+                <span className="text-[9px] font-mono" style={{ color: 'var(--text-faint)' }}>
+                  {chain.total_attempts} {chain.total_attempts === 1 ? 'attempt' : 'attempts'}
+                  {chain.total_retries > 0 ? ` · ${chain.total_retries} retries` : ''}
+                </span>
+                {chain.failure_category && (
+                  <span
+                    className="ml-auto text-[9px] px-1.5 py-0.5 rounded font-medium"
+                    style={{ color: catColor, background: `${catColor}14` }}
+                  >
+                    {FAILURE_CAT_LABEL[chain.failure_category]}
+                  </span>
+                )}
+              </div>
+
+              {/* Per-attempt rows */}
+              <div>
+                {chainTriggers.map((t, i) => {
+                  const queueSec = msToSec(t.triggered_at, t.accepted_at)
+                  const execSec  = msToSec(t.started_at, t.finished_at)
+                  const isFinal  = i === chainTriggers.length - 1
+                  const isRetry  = i > 0
+
+                  return (
+                    <div
+                      key={t.internal_id}
+                      className="flex items-center gap-2 px-3 py-1.5 text-[10px]"
+                      style={{ borderBottom: isFinal ? 'none' : '1px solid var(--border-faint)' }}
+                    >
+                      <span className="font-mono flex-shrink-0" style={{ color: 'var(--text-faint)', minWidth: '3rem' }}>
+                        {isRetry ? `retry ${i}` : 'attempt'}
+                      </span>
+                      <StatusBadge status={t.trigger_status} />
+                      {queueSec != null && (
+                        <span style={{ color: 'var(--text-faint)' }} title="Queue delay">
+                          q{fmtDuration(queueSec)}
+                        </span>
+                      )}
+                      {execSec != null && (
+                        <span style={{ color: 'var(--text-muted)' }} title="Execution time">
+                          {fmtDuration(execSec)}
+                        </span>
+                      )}
+                      <span className="ml-auto" style={{ color: 'var(--text-faint)' }}
+                            title={fmtDatetime(t.triggered_at)}>
+                        {fmtRelative(t.triggered_at)}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+    </div>
+  )
+}
+
+// ── Failure classification ────────────────────────────────────────────────
+
+function FailureClassificationBlock({ groups, triggers }: { groups: FailureGroup[]; triggers: TriggerItem[] }) {
+  if (!groups.length) return null
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const triggerById = new Map(triggers.map(t => [t.internal_id, t]))
+
+  return (
+    <div className="space-y-2">
+      {groups.map(group => {
+        const color     = FAILURE_CAT_COLOR[group.category]
+        const isOpen    = expanded === group.category
+        const groupTriggers = group.trigger_ids
+          .map(id => triggerById.get(id))
+          .filter(Boolean) as TriggerItem[]
+
+        return (
+          <div
+            key={group.category}
+            className="rounded-lg overflow-hidden"
+            style={{ border: `1px solid ${color}28` }}
+          >
+            <button
+              type="button"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left"
+              onClick={() => setExpanded(isOpen ? null : group.category)}
+              style={{ background: `${color}09` }}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full flex-shrink-0"
+                style={{ background: color }}
+                aria-hidden
+              />
+              <span className="text-[9px] font-semibold uppercase tracking-wider flex-1" style={{ color }}>
+                {FAILURE_CAT_LABEL[group.category]}
+              </span>
+              <span className="text-[9px] font-mono" style={{ color: 'var(--text-faint)' }}>
+                {group.count} {group.count === 1 ? 'failure' : 'failures'}
+              </span>
+              <ChevronDown
+                className="h-2.5 w-2.5"
+                style={{ color: 'var(--text-faint)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }}
+                aria-hidden
+              />
+            </button>
+
+            {isOpen && (
+              <div className="px-3 pb-2 pt-1 space-y-1">
+                {group.representative_error && (
+                  <pre
+                    className="text-[9px] font-mono break-all whitespace-pre-wrap rounded px-2 py-1.5 mb-2"
+                    style={{ background: `${color}09`, border: `1px solid ${color}20`, color }}
+                  >
+                    {group.representative_error.slice(0, 300)}
+                    {group.representative_error.length > 300 ? '…' : ''}
+                  </pre>
+                )}
+                {groupTriggers.map(t => (
+                  <div key={t.internal_id} className="flex items-center gap-2 text-[10px]">
+                    <span className="font-mono text-[9px]" style={{ color: 'var(--text-faint)' }}>
+                      #{t.internal_id}
+                    </span>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {fmtStageName(t.stage_name)} · {fmtServiceName(t.target_service)}
+                    </span>
+                    <span className="ml-auto text-[9px]" style={{ color: 'var(--text-faint)' }}
+                          title={fmtDatetime(t.triggered_at)}>
+                      {fmtRelative(t.triggered_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Queue latency metrics strip ───────────────────────────────────────────
+
+function QueueMetricsStrip({ metrics }: { metrics: QueueMetric[] }) {
+  if (!metrics.length) return null
+
+  const hasData = metrics.some(m => m.avg_queue_delay_seconds != null || m.avg_exec_seconds != null)
+  if (!hasData) return null
+
+  const STAGE_COLOR_MAP: Record<string, string> = {
+    intake: 'var(--stage-intake-color)',
+    qc:     'var(--stage-qc-color)',
+    dicom:  'var(--stage-dicom-color)',
+    upload: 'var(--stage-upload-color)',
+  }
+
+  return (
+    <div
+      className="glass rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--border-default)' }}
+    >
+      <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: '1px solid var(--border-faint)' }}>
+        <Gauge className="h-3 w-3" style={{ color: 'var(--text-muted)' }} aria-hidden />
+        <span className="section-label mb-0">Queue Latency · Execution Time</span>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="ops-table">
+          <thead>
+            <tr>
+              <th>Stage</th>
+              <th>Attempts</th>
+              <th>Avg Queue Wait</th>
+              <th>Avg Execution</th>
+              <th>Avg Total</th>
+              <th>Peak Queue</th>
+              <th>Peak Exec</th>
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.map(m => {
+              const color = STAGE_COLOR_MAP[m.stage.toLowerCase()] ?? 'var(--text-muted)'
+              return (
+                <tr key={m.stage}>
+                  <td>
+                    <span className="text-[10px] font-semibold" style={{ color }}>
+                      {fmtStageName(m.stage)}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="text-[10px] font-mono tabular" style={{ color: 'var(--text-muted)' }}>
+                      {m.attempts}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="text-[10px] font-mono tabular" style={{ color: 'var(--text-secondary)' }}>
+                      {m.avg_queue_delay_seconds != null ? fmtDuration(m.avg_queue_delay_seconds) : '—'}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="text-[10px] font-mono tabular" style={{ color: 'var(--text-secondary)' }}>
+                      {m.avg_exec_seconds != null ? fmtDuration(m.avg_exec_seconds) : '—'}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="text-[10px] font-mono tabular" style={{ color: 'var(--text-secondary)' }}>
+                      {m.avg_total_seconds != null ? fmtDuration(m.avg_total_seconds) : '—'}
+                    </span>
+                  </td>
+                  <td>
+                    <span
+                      className="text-[10px] font-mono tabular"
+                      style={{
+                        color: (m.max_queue_delay_seconds ?? 0) > 60
+                          ? 'var(--chart-amber)'
+                          : 'var(--text-faint)',
+                      }}
+                    >
+                      {m.max_queue_delay_seconds != null ? fmtDuration(m.max_queue_delay_seconds) : '—'}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="text-[10px] font-mono tabular" style={{ color: 'var(--text-faint)' }}>
+                      {m.max_exec_seconds != null ? fmtDuration(m.max_exec_seconds) : '—'}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Artifact path lineage ─────────────────────────────────────────────────
+
+const PATH_STAGE_COLOR: Record<string, string> = {
+  arrival:    'var(--stage-intake-color)',
+  recovery:   'var(--chart-amber)',
+  normalized: 'var(--stage-qc-color)',
+  dicom:      'var(--stage-dicom-color)',
+  upload:     'var(--stage-upload-color)',
+}
+
+function PathLineageSection({ lineage }: { lineage: PathLineageItem[] }) {
+  if (!lineage.length) return null
+
+  return (
+    <div className="space-y-0">
+      {lineage.map((item, idx) => {
+        const color   = PATH_STAGE_COLOR[item.stage] ?? 'var(--text-muted)'
+        const isLast  = idx === lineage.length - 1
+
+        return (
+          <div key={`${item.stage}-${idx}`} className="flex items-stretch gap-2">
+            {/* Spine connector */}
+            <div className="flex flex-col items-center flex-shrink-0" style={{ width: '1.25rem' }}>
+              <div
+                className="h-2 w-2 rounded-full flex-shrink-0 mt-2"
+                style={{ background: color }}
+              />
+              {!isLast && (
+                <div
+                  className="flex-1 w-px mt-0.5"
+                  style={{ background: 'var(--border-faint)', minHeight: '1rem' }}
+                />
+              )}
+            </div>
+
+            {/* Content */}
+            <div
+              className="flex-1 min-w-0 pb-3"
+              style={{ borderBottom: isLast ? 'none' : '1px solid var(--border-faint)' }}
+            >
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color }}>
+                  {item.stage}
+                </span>
+                <span className="text-[9px]" style={{ color: 'var(--text-faint)' }}>
+                  · {item.event}
+                </span>
+              </div>
+              {item.previous_filename && item.filename && (
+                <p className="text-[9px] font-mono flex items-center gap-1 mb-0.5" style={{ color: 'var(--text-faint)' }}>
+                  <span className="truncate max-w-[180px]" title={item.previous_filename}>{item.previous_filename}</span>
+                  <span>→</span>
+                  <span className="font-semibold truncate max-w-[180px]" style={{ color }} title={item.filename}>{item.filename}</span>
+                </p>
+              )}
+              {item.filename && !item.previous_filename && (
+                <p className="text-[9px] font-mono truncate" style={{ color }} title={item.filename}>
+                  {item.filename}
+                </p>
+              )}
+              {item.path && (
+                <p className="text-[9px] font-mono truncate" style={{ color: 'var(--text-faint)' }} title={item.path}>
+                  {item.path}
+                </p>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // PAGE
 // ════════════════════════════════════════════════════════════════════════
 
 export function SlideDetail() {
   const { artifactId } = useParams<{ artifactId: string }>()
-  const { data, isPending, isError, refetch } = useSlideDetail(
-    artifactId ? decodeURIComponent(artifactId) : undefined,
-  )
+  const decodedId = artifactId ? decodeURIComponent(artifactId) : undefined
+
+  // Phase 9: use the consolidated investigation hook (SSE-live, single session)
+  const { data, isPending, isError, refetch } = useArtifactInvestigation(decodedId)
 
   if (isPending) return <PageLoader />
   if (isError) return (
@@ -941,13 +1311,19 @@ export function SlideDetail() {
 
   const {
     file_record: fr,
-    qc_result:        qc,
+    qc_result:         qc,
     conversion_result: conv,
-    upload_result:    upl,
+    upload_result:     upl,
     recent_events,
     triggers,
     recovery_events,
     extraction_result: ext,
+    // Phase 9 intelligence
+    retry_chains:   retryChainsData,
+    queue_metrics:  queueMetricsData,
+    failure_groups: failureGroupsData,
+    path_lineage:   pathLineageData,
+    events_total,
   } = data
 
   const displayName   = fr.original_filename ?? fr.global_artifact_id ?? 'Artifact'
@@ -1047,6 +1423,13 @@ export function SlideDetail() {
         <ArtifactLifecycleRail triggers={triggers} status={fr.status} />
       </div>
 
+      {/* ── Phase 9 — Queue latency metrics ─────────────────────────── */}
+      {queueMetricsData.length > 0 && (
+        <div className="mb-5">
+          <QueueMetricsStrip metrics={queueMetricsData} />
+        </div>
+      )}
+
       {/* ── Main intelligence grid ───────────────────────────────────── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
 
@@ -1088,6 +1471,48 @@ export function SlideDetail() {
             </InspectionPanel>
           )}
 
+          {/* Phase 9 — Retry chain (only when retries occurred) */}
+          {retryChainsData.some(c => c.total_retries > 0 || c.final_outcome === 'failed') && (
+            <InspectionPanel
+              icon={RefreshCcw}
+              title="Retry Chains"
+              colorVar="var(--chart-amber)"
+              defaultOpen={hasFailed}
+            >
+              <div className="pt-3">
+                <RetryChainSection chains={retryChainsData} triggers={triggers} />
+              </div>
+            </InspectionPanel>
+          )}
+
+          {/* Phase 9 — Failure classification (only when failures exist) */}
+          {failureGroupsData.length > 0 && (
+            <InspectionPanel
+              icon={AlertTriangle}
+              title="Failure Classification"
+              colorVar="var(--chart-rose)"
+              defaultOpen={hasFailed}
+            >
+              <div className="pt-3">
+                <FailureClassificationBlock groups={failureGroupsData} triggers={triggers} />
+              </div>
+            </InspectionPanel>
+          )}
+
+          {/* Phase 9 — Path lineage */}
+          {pathLineageData.length > 1 && (
+            <InspectionPanel
+              icon={Route}
+              title="Artifact Path Lineage"
+              colorVar="var(--text-muted)"
+              defaultOpen={false}
+            >
+              <div className="pt-3">
+                <PathLineageSection lineage={pathLineageData} />
+              </div>
+            </InspectionPanel>
+          )}
+
           {/* Mission Event Log */}
           <InspectionPanel title="Mission Event Log" defaultOpen={!hasFailed}>
             <div className="pt-3">
@@ -1096,6 +1521,11 @@ export function SlideDetail() {
                 maxItems={20}
                 emptyMessage="No events recorded for this artifact."
               />
+              {events_total > recent_events.length && (
+                <p className="text-[9px] mt-2 font-mono" style={{ color: 'var(--text-faint)' }}>
+                  Showing {recent_events.length} of {events_total} events
+                </p>
+              )}
             </div>
           </InspectionPanel>
         </div>

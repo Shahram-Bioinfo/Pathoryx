@@ -517,6 +517,69 @@ class AuditTrailResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase 9 — Artifact investigation
+# ---------------------------------------------------------------------------
+
+
+class RetryChainItem(BaseModel):
+    stage: str
+    total_attempts: int
+    total_retries: int
+    final_outcome: Optional[str] = None
+    failure_category: Optional[str] = None  # transient|validation|infrastructure|network|parser|unknown
+    trigger_ids: list[int] = []
+
+
+class QueueMetric(BaseModel):
+    stage: str
+    attempts: int
+    avg_queue_delay_seconds: Optional[float] = None
+    avg_exec_seconds: Optional[float] = None
+    avg_total_seconds: Optional[float] = None
+    max_queue_delay_seconds: Optional[float] = None
+    max_exec_seconds: Optional[float] = None
+
+
+class FailureGroup(BaseModel):
+    category: str  # transient|validation|infrastructure|network|parser|unknown
+    count: int
+    trigger_ids: list[int] = []
+    representative_error: Optional[str] = None
+
+
+class PathLineageItem(BaseModel):
+    stage: str
+    event: str
+    filename: Optional[str] = None
+    path: Optional[str] = None
+    previous_filename: Optional[str] = None
+
+
+class ArtifactInvestigationResponse(BaseModel):
+    """
+    Full investigation bundle for a single artifact.
+
+    Returned by GET /dashboard/api/artifacts/{id}/investigation.
+    All sub-queries execute within one DB session for consistency.
+    """
+    file_record: SlideItem
+    qc_result: Optional[QCResultSummary] = None
+    conversion_result: Optional[ConversionResultSummary] = None
+    upload_result: Optional[UploadResultSummary] = None
+    extraction_result: Optional[ExtractionResultSummary] = None
+    triggers: list[TriggerItem] = []
+    recovery_events: list[RecoveryEventItem] = []
+    recent_events: list[EventItem] = []
+    events_total: int = 0
+
+    # Intelligence layers (computed server-side)
+    retry_chains: list[RetryChainItem] = []
+    queue_metrics: list[QueueMetric] = []
+    failure_groups: list[FailureGroup] = []
+    path_lineage: list[PathLineageItem] = []
+
+
+# ---------------------------------------------------------------------------
 # Services health
 # ---------------------------------------------------------------------------
 

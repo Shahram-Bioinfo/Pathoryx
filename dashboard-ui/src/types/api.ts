@@ -428,6 +428,59 @@ export interface AuditTrailResponse {
   events: AuditEventItem[]
 }
 
+// ---- Phase 9 — Artifact investigation ----
+
+export interface RetryChainItem {
+  stage: string
+  total_attempts: number
+  total_retries: number
+  final_outcome: string | null
+  /** transient | validation | infrastructure | network | parser | unknown */
+  failure_category: string | null
+  trigger_ids: number[]
+}
+
+export interface QueueMetric {
+  stage: string
+  attempts: number
+  avg_queue_delay_seconds: number | null
+  avg_exec_seconds: number | null
+  avg_total_seconds: number | null
+  max_queue_delay_seconds: number | null
+  max_exec_seconds: number | null
+}
+
+export interface FailureGroup {
+  category: string
+  count: number
+  trigger_ids: number[]
+  representative_error: string | null
+}
+
+export interface PathLineageItem {
+  stage: string
+  event: string
+  filename: string | null
+  path: string | null
+  previous_filename?: string | null
+}
+
+export interface ArtifactInvestigationResponse {
+  file_record: SlideItem
+  qc_result: QCResultSummary | null
+  conversion_result: ConversionResultSummary | null
+  upload_result: UploadResultSummary | null
+  extraction_result: ExtractionResultSummary | null
+  triggers: TriggerItem[]
+  recovery_events: RecoveryEventItem[]
+  recent_events: EventItem[]
+  events_total: number
+  retry_chains: RetryChainItem[]
+  queue_metrics: QueueMetric[]
+  failure_groups: FailureGroup[]
+  path_lineage: PathLineageItem[]
+}
+
 // ---- Services health ----
 
 export interface RunnerItem {

@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { SlideDetailResponse, SlideListResponse } from '../types/api'
+import type { ArtifactInvestigationResponse, SlideDetailResponse, SlideListResponse } from '../types/api'
 
 export interface SlideListParams {
   page?: number
@@ -16,3 +16,12 @@ export const fetchSlides = (params: SlideListParams = {}): Promise<SlideListResp
 
 export const fetchSlideDetail = (globalArtifactId: string): Promise<SlideDetailResponse> =>
   apiFetch<SlideDetailResponse>(`/slides/${encodeURIComponent(globalArtifactId)}`)
+
+export const fetchArtifactInvestigation = (
+  globalArtifactId: string,
+  eventsLimit = 100,
+): Promise<ArtifactInvestigationResponse> =>
+  apiFetch<ArtifactInvestigationResponse>(
+    `/artifacts/${encodeURIComponent(globalArtifactId)}/investigation`,
+    { events_limit: eventsLimit },
+  )

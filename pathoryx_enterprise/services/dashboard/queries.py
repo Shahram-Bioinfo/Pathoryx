@@ -642,6 +642,355 @@ def get_technician_change(
     ).scalar_one_or_none()
 
 
+# ---------------------------------------------------------------------------
+# Phase 9 — Artifact investigation intelligence
+# ---------------------------------------------------------------------------
+
+# Maps error-message keywords to failure categories for display.
+# Keys are lowercased substrings; values are category labels.
+_FAILURE_PATTERNS: list[tuple[str, str]] = [
+    # Network / PACS / C-STORE
+    ("c_store", "network"),   ("cstore", "network"),
+    ("pacs", "network"),      ("unreachable", "network"),
+    ("connection refused", "network"), ("connection reset", "network"),
+    ("epipe", "network"),
+    # Infrastructure
+    ("database", "infrastructure"), ("sqlalchemy", "infrastructure"),
+    ("disk", "infrastructure"),     ("ioerror", "infrastructure"),
+    ("no space", "infrastructure"), ("permission", "infrastructure"),
+    ("timeout", "transient"),  ("timed out", "transient"),
+    ("retry", "transient"),
+    # Validation / parser
+    ("invalid_slide_id", "parser"),  ("slide_id", "parser"),
+    ("parse", "parser"),             ("ocr", "parser"),
+    ("datamatrix", "parser"),        ("label", "parser"),
+    ("unsupported format", "validation"), ("invalid format", "validation"),
+    ("validation", "validation"),    ("schema", "validation"),
+    ("missing", "validation"),
+]
+
+
+def _categorize_error(msg: Optional[str]) -> str:
+    """Return one of: transient | validation | infrastructure | network | parser | unknown."""
+    if not msg:
+        return "unknown"
+    low = msg.lower()
+    for keyword, cat in _FAILURE_PATTERNS:
+        if keyword in low:
+            return cat
+    return "unknown"
+
+
+def _gv(obj, field: str, default=None):
+    """
+    Get a field from an ORM object, SimpleNamespace, or dict uniformly.
+    Avoids the need for `or t.get(field)` patterns that break SimpleNamespace.
+    """
+    if isinstance(obj, dict):
+        return obj.get(field, default)
+    return getattr(obj, field, default)
+
+
+def build_retry_chains(triggers: list) -> list[dict]:
+    """
+    Group triggers by stage_name and build per-stage retry chains.
+
+    For each stage, triggers are ordered by triggered_at so the sequence of
+    attempts is visible.  The final outcome is taken from the most-recent trigger.
+
+    Accepts ServiceTrigger ORM objects, SimpleNamespace, or dicts.
+    """
+    from collections import defaultdict
+
+    by_stage: dict[str, list] = defaultdict(list)
+    for t in triggers:
+        stage = _gv(t, "stage_name") or "unknown"
+        by_stage[stage].append(t)
+
+    chains = []
+    for stage, stage_triggers in by_stage.items():
+        sorted_ts = sorted(
+            stage_triggers,
+            key=lambda t: (_gv(t, "triggered_at") or ""),
+        )
+        total_retries = sum(_gv(t, "retry_count") or 0 for t in sorted_ts)
+        statuses = [_gv(t, "trigger_status") for t in sorted_ts]
+        final_outcome = (
+            "completed" if "completed" in statuses
+            else "failed" if "failed" in statuses
+            else statuses[-1] if statuses else None
+        )
+        errors = [
+            _gv(t, "error_message")
+            for t in sorted_ts
+            if _gv(t, "error_message")
+        ]
+        failure_category = _categorize_error(errors[0] if errors else None)
+
+        chains.append({
+            "stage": stage,
+            "total_attempts": len(sorted_ts),
+            "total_retries": total_retries,
+            "final_outcome": final_outcome,
+            "failure_category": failure_category if final_outcome == "failed" else None,
+            "trigger_ids": [_gv(t, "internal_id") for t in sorted_ts],
+        })
+
+    chains.sort(key=lambda c: c["stage"])
+    return chains
+
+
+def build_queue_metrics(triggers: list) -> list[dict]:
+    """
+    Compute per-stage queue latency and execution time metrics.
+
+    queue_delay  = accepted_at - triggered_at  (time waiting in queue)
+    exec_time    = finished_at - started_at     (actual execution time)
+    total_time   = finished_at - triggered_at   (end-to-end from dispatch)
+
+    Accepts ServiceTrigger ORM objects, SimpleNamespace, or dicts.
+    """
+    from collections import defaultdict
+
+    by_stage: dict[str, list] = defaultdict(list)
+    for t in triggers:
+        stage = _gv(t, "stage_name") or "unknown"
+        by_stage[stage].append(t)
+
+    def _epoch(v) -> Optional[float]:
+        if v is None:
+            return None
+        if hasattr(v, "timestamp"):
+            return v.timestamp()
+        return None
+
+    metrics = []
+    for stage, stage_triggers in sorted(by_stage.items()):
+        queue_delays: list[float] = []
+        exec_times:   list[float] = []
+        total_times:  list[float] = []
+
+        for t in stage_triggers:
+            triggered = _epoch(_gv(t, "triggered_at"))
+            accepted  = _epoch(_gv(t, "accepted_at"))
+            started   = _epoch(_gv(t, "started_at"))
+            finished  = _epoch(_gv(t, "finished_at"))
+
+            if triggered and accepted and (accepted - triggered) >= 0:
+                queue_delays.append(accepted - triggered)
+            if started and finished and (finished - started) >= 0:
+                exec_times.append(finished - started)
+            if triggered and finished and (finished - triggered) >= 0:
+                total_times.append(finished - triggered)
+
+        metrics.append({
+            "stage": stage,
+            "attempts": len(stage_triggers),
+            "avg_queue_delay_seconds": (sum(queue_delays) / len(queue_delays)) if queue_delays else None,
+            "avg_exec_seconds":        (sum(exec_times)  / len(exec_times))   if exec_times   else None,
+            "avg_total_seconds":       (sum(total_times) / len(total_times))  if total_times  else None,
+            "max_queue_delay_seconds": max(queue_delays) if queue_delays else None,
+            "max_exec_seconds":        max(exec_times)   if exec_times   else None,
+        })
+
+    return metrics
+
+
+def build_failure_groups(triggers: list) -> list[dict]:
+    """
+    Group failed triggers by failure category.
+
+    Returns one entry per category with the list of trigger IDs and a
+    representative error message.
+
+    Accepts ServiceTrigger ORM objects, SimpleNamespace, or dicts.
+    """
+    from collections import defaultdict
+
+    failed = [t for t in triggers if _gv(t, "trigger_status") == "failed"]
+
+    by_cat: dict[str, list] = defaultdict(list)
+    for t in failed:
+        cat = _categorize_error(_gv(t, "error_message"))
+        by_cat[cat].append(t)
+
+    groups = []
+    for cat, cat_triggers in sorted(by_cat.items()):
+        representative_error = next(
+            (_gv(t, "error_message") for t in cat_triggers if _gv(t, "error_message")),
+            None,
+        )
+        groups.append({
+            "category": cat,
+            "count": len(cat_triggers),
+            "trigger_ids": [_gv(t, "internal_id") for t in cat_triggers],
+            "representative_error": representative_error,
+        })
+
+    return groups
+
+
+def build_path_lineage(
+    file_record: FileRecord,
+    conversion_result: Optional[ConversionResult],
+    upload_result: Optional[UploadResult],
+    recovery_events: list[TechnicianChange],
+) -> list[dict]:
+    """
+    Reconstruct the complete filename/path evolution for an artifact.
+
+    Stages: arrival → renamed (optional) → normalized → dicom_output → uploaded
+    """
+    lineage: list[dict] = []
+
+    if file_record.original_filename:
+        lineage.append({
+            "stage": "arrival",
+            "event": "scanner deposit",
+            "filename": file_record.original_filename,
+            "path": file_record.original_path,
+        })
+
+    # Interleave recovery renames in chronological order
+    for rv in sorted(
+        recovery_events,
+        key=lambda r: getattr(r, "detected_at", None) or r.detected_at or "",
+    ):
+        if rv.old_filename and rv.new_filename and rv.old_filename != rv.new_filename:
+            source = "dashboard correction" if rv.inferred_action == "dashboard_correction" else "manual rename"
+            lineage.append({
+                "stage": "recovery",
+                "event": source,
+                "filename": rv.new_filename,
+                "path": rv.new_path,
+                "previous_filename": rv.old_filename,
+            })
+
+    # Current location (after all renames)
+    if (
+        file_record.current_filename
+        and file_record.current_filename != file_record.original_filename
+        and not any(e["filename"] == file_record.current_filename for e in lineage)
+    ):
+        lineage.append({
+            "stage": "normalized",
+            "event": "pipeline rename",
+            "filename": file_record.current_filename,
+            "path": file_record.current_file_path,
+        })
+
+    if conversion_result and conversion_result.output_path:
+        lineage.append({
+            "stage": "dicom",
+            "event": "DICOM output",
+            "filename": None,
+            "path": conversion_result.output_path,
+        })
+
+    if upload_result and upload_result.target_endpoint:
+        lineage.append({
+            "stage": "upload",
+            "event": "transmitted to PACS",
+            "filename": None,
+            "path": upload_result.target_endpoint,
+        })
+
+    return lineage
+
+
+def get_artifact_investigation(
+    session: Session,
+    global_artifact_id: str,
+    events_limit: int = 100,
+) -> Optional[dict]:
+    """
+    Consolidated investigation query for Phase 9.
+
+    Executes all sub-queries within a single session to ensure consistency
+    and avoid repeated connection overhead.  Returns None when the artifact
+    does not exist.
+    """
+    record = session.execute(
+        select(FileRecord).where(FileRecord.global_artifact_id == global_artifact_id)
+    ).scalar_one_or_none()
+    if record is None:
+        return None
+
+    rid = record.internal_id
+
+    triggers = list(
+        session.execute(
+            select(ServiceTrigger)
+            .where(ServiceTrigger.global_artifact_id == global_artifact_id)
+            .order_by(ServiceTrigger.triggered_at.asc())
+        ).scalars().all()
+    )
+
+    recovery = list(
+        session.execute(
+            select(TechnicianChange)
+            .where(TechnicianChange.global_artifact_id == global_artifact_id)
+            .order_by(TechnicianChange.detected_at.asc())
+        ).scalars().all()
+    )
+
+    events = list(
+        session.execute(
+            select(PipelineEvent)
+            .where(PipelineEvent.global_artifact_id == global_artifact_id)
+            .order_by(PipelineEvent.occurred_at.desc())
+            .limit(events_limit)
+        ).scalars().all()
+    )
+
+    events_total: int = session.execute(
+        select(func.count())
+        .select_from(PipelineEvent)
+        .where(PipelineEvent.global_artifact_id == global_artifact_id)
+    ).scalar() or 0
+
+    ext = session.execute(
+        select(ExtractionResult)
+        .where(ExtractionResult.file_record_internal_id == rid)
+        .order_by(ExtractionResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
+
+    qc = session.execute(
+        select(QCResult)
+        .where(QCResult.file_record_internal_id == rid)
+        .order_by(QCResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
+
+    conv = session.execute(
+        select(ConversionResult)
+        .where(ConversionResult.file_record_internal_id == rid)
+        .order_by(ConversionResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
+
+    upl = session.execute(
+        select(UploadResult)
+        .where(UploadResult.file_record_internal_id == rid)
+        .order_by(UploadResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
+
+    return {
+        "file_record":        record,
+        "triggers":           triggers,
+        "recovery_events":    recovery,
+        "events":             events,
+        "events_total":       events_total,
+        "extraction_result":  ext,
+        "qc_result":          qc,
+        "conversion_result":  conv,
+        "upload_result":      upl,
+        # Computed intelligence layers
+        "retry_chains":       build_retry_chains(triggers),
+        "queue_metrics":      build_queue_metrics(triggers),
+        "failure_groups":     build_failure_groups(triggers),
+        "path_lineage":       build_path_lineage(record, conv, upl, recovery),
+    }
+
+
 def get_artifact_audit_trail(session: Session, file_id: int) -> dict:
     """
     Return the complete audit history for a watched folder file.

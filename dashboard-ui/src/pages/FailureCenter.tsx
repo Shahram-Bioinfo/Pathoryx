@@ -1,6 +1,6 @@
 import {
   AlertTriangle, ChevronDown, ChevronRight, ChevronUp,
-  ClipboardCheck, FileText, RefreshCcw, Zap,
+  ClipboardCheck, FileText, RefreshCcw, Search, Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -513,12 +513,11 @@ function ServiceIncidentGroup({
 function FailedSlideRow({
   slide,
   hasRecovery,
-  onNavigate,
   onReview,
 }: {
   slide: FailedSlideItem
   hasRecovery: boolean
-  onNavigate: () => void
+  onNavigate?: () => void  // kept for API compat but not used — navigation via Link
   onReview?: (slide: FailedSlideItem) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -619,14 +618,17 @@ function FailedSlideRow({
               </button>
             )}
             {slide.global_artifact_id && (
-              <button
-                type="button"
-                className="ml-auto flex items-center gap-1"
-                style={{ color: 'var(--accent)', fontSize: '10px' }}
-                onClick={e => { e.stopPropagation(); onNavigate() }}
-              >
-                View Slide Detail <ChevronRight className="h-2.5 w-2.5" aria-hidden />
-              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <Link
+                  to={`/slides/${encodeURIComponent(slide.global_artifact_id)}`}
+                  className="flex items-center gap-1 text-[10px]"
+                  style={{ color: 'var(--accent)' }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <Search className="h-2.5 w-2.5" aria-hidden />
+                  Investigate
+                </Link>
+              </div>
             )}
           </div>
         </div>
