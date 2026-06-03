@@ -1,0 +1,36 @@
+# Base image shared by all Pathoryx Enterprise services.
+# Contains system dependencies and the installed enterprise package.
+# Service-specific images extend this.
+
+FROM python:3.12-slim AS base
+
+# System dependencies needed across services
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    dcmtk \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install the enterprise package first (layer cached unless pyproject changes)
+COPY pyproject.toml .
+COPY pathoryx_enterprise/__init__.py pathoryx_enterprise/__init__.py
+
+# Install only the base dependencies (no ML extras) in the base layer
+RUN pip install --no-cache-dir -e ".[base]" || \
+    pip install --no-cache-dir psycopg2-binary sqlalchemy alembic pydantic pydantic-settings \
+    structlog prometheus-client opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc \
+    python-dotenv pyyaml
+
+# Copy full source (individual service Dockerfiles override with COPY for their paths)
+COPY pathoryx_enterprise/ pathoryx_enterprise/
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+# Non-root user for security
+RUN groupadd -r pathoryx && useradd -r -g pathoryx pathoryx
+USER pathoryx

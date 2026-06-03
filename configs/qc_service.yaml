@@ -1,0 +1,89 @@
+# =============================================================================
+# Pathoryx — QC Service Routing & Scanner Policy Configuration
+# Windows Test Environment
+# Loaded via env var: QC_SERVICE_CONFIG
+#
+# This file controls WHAT to do with files and WHERE they go.
+# The inference config (qc_config.yaml) controls HOW inference is performed.
+# =============================================================================
+
+service:
+  name: qc_service
+  enabled: true
+  inference_config_path: ./configs/qc_config.yaml
+
+  # Global operational mode.
+  #   "pre_babelshark"  — watcher only (QC before BabelShark)
+  #   "post_babelshark" — trigger only (QC after BabelShark)
+  #   "both"            — watcher + trigger concurrently
+  #   "disabled"        — service starts but processes nothing
+  mode: post_babelshark
+
+  next_stage:
+    target_service: dicom_service
+    stage_name: dicom
+
+
+# =============================================================================
+# Pre-BabelShark Watcher Settings
+# =============================================================================
+pre_babelshark:
+  poll_interval_seconds: 10
+  stable_file_wait_seconds: 20
+  allowed_extensions:
+    - ".svs"
+    - ".tif"
+    - ".tiff"
+    - ".ndpi"
+    - ".mrxs"
+    - ".vms"
+  recursive: false
+  file_routing: copy
+  max_workers: 2
+
+
+# =============================================================================
+# Post-BabelShark Trigger Settings
+# =============================================================================
+post_babelshark:
+  trigger_target_service: qc_service
+  trigger_stage_name: qc
+  max_workers: 2
+  trigger_poll_interval_seconds: 10
+  max_consecutive_errors: 10
+  next_service: dicom_service
+  next_stage: dicom
+
+
+# =============================================================================
+# Scanner Policies — Windows Test Environment
+# Update input_dir paths for your actual scanner drop folders.
+# =============================================================================
+scanner_policies:
+
+  # ── Default: post-BabelShark QC for all scanners ─────────────────────────
+  - scanner_id: __default__
+    input_dir: null
+    pathoryx_qc_enabled: true
+    qc_position: post_babelshark
+    trust_scanner_qc: false
+    file_routing: copy
+    passed_output_dir: "C:/Users/Public/projects/Pathoryx/data/watch"
+    failed_output_dir: "C:/Users/Public/projects/Pathoryx/data/failed"
+    quarantine_dir: "C:/Users/Public/projects/Pathoryx/data/quarantine"
+    next_service: dicom_service
+    next_stage: dicom
+
+  # ── Example: scanner feeding into BabelShark watch folder ────────────────
+  # Uncomment and set input_dir to your scanner's network share path.
+  # - scanner_id: scanner_fake
+  #   input_dir: "C:/Users/Public/projects/Pathoryx/data/scanner_fake"
+  #   pathoryx_qc_enabled: true
+  #   qc_position: pre_babelshark
+  #   trust_scanner_qc: false
+  #   file_routing: copy
+  #   passed_output_dir: "C:/Users/Public/projects/Pathoryx/data/watch"
+  #   failed_output_dir: "C:/Users/Public/projects/Pathoryx/data/failed"
+  #   quarantine_dir: "C:/Users/Public/projects/Pathoryx/data/quarantine"
+  #   next_service: null
+  #   next_stage: null

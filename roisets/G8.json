@@ -1,0 +1,38 @@
+[
+    {
+        "label": "datamatrix",
+        "x": 13,
+        "y": 31,
+        "width": 144,
+        "height": 150,
+        "_rect_id": 3,
+        "_text_id": 4
+    },
+    {
+        "label": "stain",
+        "x": 161,
+        "y": 103,
+        "width": 134,
+        "height": 62,
+        "_rect_id": 5,
+        "_text_id": 6
+    },
+    {
+        "label": "pot-blockid",
+        "x": 7,
+        "y": 241,
+        "width": 102,
+        "height": 59,
+        "_rect_id": 9,
+        "_text_id": 10
+    },
+    {
+        "label": "casenumber",
+        "x": 2,
+        "y": 186,
+        "width": 301,
+        "height": 62,
+        "_rect_id": 16,
+        "_text_id": 17
+    }
+]

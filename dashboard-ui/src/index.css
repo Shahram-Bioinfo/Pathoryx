@@ -1,0 +1,572 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ══════════════════════════════════════════════════════════════
+   SEMANTIC DESIGN TOKENS
+   All colour decisions live here. Components reference only vars.
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Light theme: Futuristic Clinical Command Center ───────── */
+
+  /* Backgrounds */
+  --bg-base:       #eef4fb;          /* Page canvas — cool blue-white */
+  --bg-sub:        #e2edf6;          /* Sidebar, secondary surfaces */
+  --bg-overlay:    rgba(238,244,251,0.92);  /* TopBar, floating menus */
+
+  /* Surfaces (cards, panels) */
+  --surface-1:     rgba(255,255,255,0.82);  /* Primary card */
+  --surface-2:     rgba(255,255,255,0.95);  /* Elevated card */
+  --surface-inset: rgba(226,237,246,0.50);  /* Inset areas, inputs */
+
+  /* Borders */
+  --border-faint:   rgba(2,132,199,0.08);
+  --border-default: rgba(2,132,199,0.14);
+  --border-strong:  rgba(2,132,199,0.26);
+  --border-focus:   rgba(2,132,199,0.50);
+
+  /* Text */
+  --text-primary:   #0c1a2e;   /* Headings, values */
+  --text-secondary: #2d5070;   /* Labels, descriptions */
+  --text-muted:     #6b90a8;   /* Timestamps, metadata */
+  --text-faint:     #9ab8cc;   /* Placeholder, dividers */
+
+  /* Accent */
+  --accent:         #0284c7;   /* sky-600 — primary interaction */
+  --accent-faint:   rgba(2,132,199,0.07);
+  --accent-medium:  rgba(2,132,199,0.14);
+
+  /* Accent gradient for decorative lines — slightly more defined in light */
+  --accent-line: linear-gradient(90deg, transparent, rgba(2,132,199,0.55), transparent);
+
+  /* Glass (card backdrop)
+   * More translucent than before so the ambient gradient underneath shows through,
+   * creating genuine depth rather than a flat frosted surface.
+   */
+  --glass-bg:     linear-gradient(140deg, rgba(255,255,255,0.72), rgba(230,245,255,0.60));
+  --glass-hover:  rgba(2,132,199,0.28);   /* ::after border on hover — strong enough to perceive */
+
+  /* Sidebar */
+  --sidebar-bg:          #dcedf8;
+  --sidebar-border:      rgba(2,132,199,0.13);
+  --sidebar-text:        #4a7490;
+  --sidebar-text-active: #0c1a2e;
+  --sidebar-accent-bar:  #0284c7;
+  --sidebar-active-bg:   rgba(2,132,199,0.10);
+  --sidebar-hover-bg:    rgba(2,132,199,0.05);
+
+  /* Skeletons */
+  --skeleton-base:   rgba(2,132,199,0.05);
+  --skeleton-shine:  rgba(2,132,199,0.10);
+
+  /* Shadows — three-layer system mirrors physical depth.
+   *
+   * Layer 1 (structural): 1-2px  — hard near-shadow defines card edge
+   * Layer 2 (ambient):    4-16px — soft mid-field lift from the surface
+   * Layer 3 (border):     0px    — 1px outline separates card from bg
+   *
+   * The ambient layer uses blue-shifted hue so shadows read as "light"
+   * bouncing back from a clinical environment, not as muddy grey.
+   */
+  --shadow-card:
+    0 1px 2px  rgba(0, 50, 110, 0.05),
+    0 4px 14px rgba(0, 70, 130, 0.07),
+    0 0 0 1px  rgba(2, 132, 199, 0.10);
+
+  /* Hover lift — adds a perceivable z-step above the resting card */
+  --shadow-card-hover:
+    0 2px 4px  rgba(0, 50, 110, 0.06),
+    0 12px 28px rgba(0, 70, 130, 0.10),
+    0 0 0 1px  rgba(2, 132, 199, 0.24),
+    0 0 20px   rgba(2, 132, 199, 0.07);
+
+  /* Panel — for larger elevated containers (table wrappers, full-width sections) */
+  --shadow-panel:
+    0 2px 8px  rgba(0, 50, 110, 0.05),
+    0 8px 24px rgba(0, 70, 130, 0.07),
+    0 0 0 1px  rgba(2, 132, 199, 0.09);
+
+  /* Sidebar right-edge separation */
+  --sidebar-shadow: 4px 0 20px rgba(0, 60, 120, 0.07);
+
+  /* TopBar bottom-edge separation */
+  --topbar-shadow: 0 1px 3px rgba(0, 60, 120, 0.06), 0 3px 10px rgba(0, 60, 120, 0.04);
+
+  /* Background scene — three offset radials create the impression of a lit space.
+   * Each radial is positioned at a different corner at very low opacity (≤ 0.28)
+   * so they contribute depth without drawing attention.
+   */
+  --scene-gradient:
+    radial-gradient(ellipse 75% 48% at 12%  4%,  rgba(186, 230, 253, 0.28) 0%, transparent 65%),
+    radial-gradient(ellipse 55% 38% at 88%  90%, rgba(196, 241, 255, 0.20) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 28% at 55%  48%, rgba(219, 238, 252, 0.12) 0%, transparent 68%),
+    linear-gradient(180deg, #edf6fd 0%, #eef4fb 55%, #e9f2fa 100%);
+
+  --scene-dot:      rgba(2, 132, 199, 0.065);
+  --scene-nebula-a: rgba(99, 102, 241, 0.055);
+  --scene-nebula-b: rgba(2,  132, 199, 0.050);
+  --scene-vignette: rgba(210, 230, 248, 0.35);
+
+  /* Stage colours (pipeline) — darker for light bg */
+  --stage-intake-color:  #0284c7;
+  --stage-intake-bg:     rgba(2,132,199,0.08);
+  --stage-intake-border: rgba(2,132,199,0.28);
+  --stage-qc-color:      #4338ca;
+  --stage-qc-bg:         rgba(67,56,202,0.08);
+  --stage-qc-border:     rgba(67,56,202,0.26);
+  --stage-dicom-color:   #7c3aed;
+  --stage-dicom-bg:      rgba(124,58,237,0.08);
+  --stage-dicom-border:  rgba(124,58,237,0.26);
+  --stage-upload-color:  #0d9488;
+  --stage-upload-bg:     rgba(13,148,136,0.08);
+  --stage-upload-border: rgba(13,148,136,0.28);
+
+  /* Chart colours — mid-range, legible on both backgrounds */
+  --chart-cyan:    #0891b2;
+  --chart-teal:    #0d9488;
+  --chart-indigo:  #4338ca;
+  --chart-emerald: #059669;
+  --chart-amber:   #d97706;
+  --chart-rose:    #e11d48;
+  --chart-violet:  #7c3aed;
+  --chart-slate:   #64748b;
+
+  /* Recharts tooltip */
+  --tooltip-bg:     rgba(240,248,255,0.97);
+  --tooltip-border: rgba(2,132,199,0.20);
+  --tooltip-text:   #0c1a2e;
+}
+
+/* ── Dark theme: Deep-Space Mission Control ─────────────────── */
+.dark {
+  --bg-base:       #040C1A;
+  --bg-sub:        #061222;
+  --bg-overlay:    rgba(4,10,22,0.88);
+
+  --surface-1:     rgba(34,211,238,0.03);
+  --surface-2:     rgba(4,18,40,0.72);
+  --surface-inset: rgba(2,10,26,0.60);
+
+  --border-faint:   rgba(34,211,238,0.06);
+  --border-default: rgba(34,211,238,0.10);
+  --border-strong:  rgba(34,211,238,0.22);
+  --border-focus:   rgba(34,211,238,0.45);
+
+  --text-primary:   #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted:     #475569;
+  --text-faint:     #334155;
+
+  --accent:         #22D3EE;
+  --accent-faint:   rgba(34,211,238,0.06);
+  --accent-medium:  rgba(34,211,238,0.14);
+
+  --accent-line: linear-gradient(90deg, transparent, rgba(34,211,238,0.45), transparent);
+
+  --glass-bg:     linear-gradient(140deg, rgba(34,211,238,0.04), rgba(4,18,40,0.62));
+  --glass-hover:  rgba(34,211,238,0.18);
+
+  --sidebar-bg:          rgba(4,10,22,0.97);
+  --sidebar-border:      rgba(34,211,238,0.07);
+  --sidebar-text:        #64748b;
+  --sidebar-text-active: #e2e8f0;
+  --sidebar-accent-bar:  #22D3EE;
+  --sidebar-active-bg:   rgba(255,255,255,0.04);
+  --sidebar-hover-bg:    rgba(255,255,255,0.025);
+
+  --skeleton-base:   rgba(34,211,238,0.04);
+  --skeleton-shine:  rgba(34,211,238,0.07);
+
+  --shadow-card:       0 1px 3px rgba(0,0,0,0.50);
+  --shadow-card-hover: 0 4px 20px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.22);
+  --shadow-panel:      0 8px 24px rgba(0,0,0,0.40), 0 0 0 1px rgba(34,211,238,0.06);
+  --sidebar-shadow:    none;
+  --topbar-shadow:     none;
+
+  --scene-gradient: radial-gradient(ellipse 110% 65% at 50% 0%, #061d38 0%, #040C1A 60%, #020810 100%);
+  --scene-dot:      rgba(34,211,238,0.055);
+  --scene-nebula-a: rgba(99,102,241,0.06);
+  --scene-nebula-b: rgba(8,145,178,0.05);
+  --scene-vignette: rgba(2,8,16,0.55);
+
+  --stage-intake-color:  #22D3EE;
+  --stage-intake-bg:     rgba(34,211,238,0.08);
+  --stage-intake-border: rgba(34,211,238,0.30);
+  --stage-qc-color:      #818CF8;
+  --stage-qc-bg:         rgba(129,140,248,0.08);
+  --stage-qc-border:     rgba(129,140,248,0.28);
+  --stage-dicom-color:   #C084FC;
+  --stage-dicom-bg:      rgba(192,132,252,0.08);
+  --stage-dicom-border:  rgba(192,132,252,0.28);
+  --stage-upload-color:  #2DD4BF;
+  --stage-upload-bg:     rgba(45,212,191,0.08);
+  --stage-upload-border: rgba(45,212,191,0.28);
+
+  /* Darker theme uses brighter neon — same hues, higher luminance */
+  --chart-cyan:    #22D3EE;
+  --chart-teal:    #2DD4BF;
+  --chart-indigo:  #818CF8;
+  --chart-emerald: #34D399;
+  --chart-amber:   #FCD34D;
+  --chart-rose:    #FB7185;
+  --chart-violet:  #C084FC;
+  --chart-slate:   #64748b;
+
+  --tooltip-bg:     rgba(4,12,26,0.96);
+  --tooltip-border: rgba(34,211,238,0.18);
+  --tooltip-text:   #e2e8f0;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BASE
+   ══════════════════════════════════════════════════════════════ */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    transition: background-color 200ms ease, color 200ms ease;
+  }
+
+  ::-webkit-scrollbar              { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-track        { background: transparent; }
+  ::-webkit-scrollbar-thumb        { background: var(--border-strong); border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover  { background: var(--accent-medium); }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   COMPONENTS
+   ══════════════════════════════════════════════════════════════ */
+@layer components {
+
+  /* ── Glass surface ──────────────────────────────────────────── */
+  .glass {
+    position: relative;
+    background: var(--glass-bg);
+    border: 1px solid var(--border-default);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-card);
+    /*
+     * Include transform so the hover translateY(-1px) is composited —
+     * it triggers no layout recalc. box-shadow transitions on user
+     * interaction (not continuous) are acceptable.
+     */
+    transition:
+      background    200ms ease,
+      border-color  200ms ease,
+      box-shadow    220ms cubic-bezier(0.4, 0, 0.2, 1),
+      transform     180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  /* Hover border overlay — pure opacity transition, zero paint cost */
+  .glass::after {
+    content: '';
+    position: absolute;
+    inset: -1px;              /* Sit outside the native border so both layer cleanly */
+    border-radius: inherit;
+    border: 1px solid var(--glass-hover);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /*
+   * Hover state: lift (transform) + deeper shadow + border overlay.
+   * The slight overshoot on the spring easing (1.56) gives the lift
+   * a physical quality without skeuomorphism.
+   */
+  .glass-hover:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+  .glass-hover:hover::after { opacity: 1; }
+
+  /* ── Mission card ────────────────────────────────────────────── */
+  .mission-card {
+    @apply glass rounded-xl overflow-hidden;
+  }
+  .mission-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 10%; right: 10%;
+    height: 1px;
+    background: var(--accent-line);
+    pointer-events: none;
+    /* Separate z-index keeps it above backdrop-filter compositing layers */
+    z-index: 1;
+  }
+
+  /* ── Buttons ─────────────────────────────────────────────────── */
+  .btn-ops {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium;
+    color: var(--accent);
+    background: var(--accent-faint);
+    border: 1px solid var(--border-default);
+    transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+  }
+  .btn-ops:hover {
+    background: var(--accent-medium);
+    border-color: var(--border-strong);
+  }
+  .btn-ops:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--border-focus);
+  }
+
+  .btn-ghost-ops {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium;
+    color: var(--text-muted);
+    transition: color 150ms ease, background-color 150ms ease;
+  }
+  .btn-ghost-ops:hover {
+    color: var(--text-primary);
+    background: var(--accent-faint);
+  }
+  .btn-ghost-ops:focus-visible { outline: none; }
+
+  /* ── Form controls ───────────────────────────────────────────── */
+  .ops-input {
+    @apply block w-full rounded-md text-sm px-3 py-2;
+    background: var(--surface-inset);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .ops-input::placeholder { color: var(--text-faint); }
+  .ops-input:focus {
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 3px var(--accent-faint);
+  }
+
+  .ops-select {
+    @apply rounded-md text-sm px-3 py-2 cursor-pointer;
+    background: var(--surface-inset);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 150ms ease;
+  }
+  .ops-select:focus { border-color: var(--border-focus); }
+
+  /* ── Data table ──────────────────────────────────────────────── */
+  .ops-table { @apply w-full text-sm; }
+
+  .ops-table thead tr {
+    background: var(--accent-faint);
+    border-bottom: 1px solid var(--border-default);
+  }
+  .ops-table thead th {
+    @apply text-left px-4 py-2;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .ops-table tbody tr {
+    border-bottom: 1px solid var(--border-faint);
+    transition: background-color 100ms ease;
+  }
+  .ops-table tbody tr:hover { background: var(--accent-faint); }
+  /*
+   * py-2 (8px top + bottom) vs previous py-3 (12px).
+   * Saves 8px per row — on a 10-row table that's 80px of recovered vertical
+   * space, making the table scan like an operations log rather than a SaaS
+   * admin grid.
+   */
+  .ops-table tbody td { @apply px-4 py-2; }
+
+  /* ── Skeleton ─────────────────────────────────────────────────── */
+  .ops-skeleton {
+    position: relative;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--skeleton-base);
+  }
+  .ops-skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
+    will-change: transform;
+    animation: skeletonSweep 1.8s ease-in-out infinite;
+  }
+
+  /* ── Section label ────────────────────────────────────────────── */
+  .section-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;   /* was 0.75rem — tighter operational rhythm */
+  }
+
+  /*
+   * Panel annotation — follows a section-label to provide system context.
+   * Deliberately LESS emphatic than a heading: 10px monospace, faint color,
+   * small tracking. Reads as a technical annotation, not a UI title.
+   *
+   * Use <p className="panel-anno"> instead of <h2 className="text-sm font-semibold">
+   * inside glass panels. Eliminates the "two-level heading" dashboard pattern.
+   */
+  .panel-anno {
+    display: block;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    margin-bottom: 0.875rem;
+  }
+
+  /* ── Live badge ───────────────────────────────────────────────── */
+  .live-badge {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--border-default);
+    background: var(--accent-faint);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════════════════ */
+@layer utilities {
+  .tabular    { font-variant-numeric: tabular-nums; }
+  .no-select  { user-select: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none                     { scrollbar-width: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RECHARTS — semantic overrides
+   ══════════════════════════════════════════════════════════════ */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical   line {
+  stroke: var(--border-faint) !important;
+}
+.recharts-xAxis  .recharts-cartesian-axis-line,
+.recharts-yAxis  .recharts-cartesian-axis-line { stroke: transparent !important; }
+
+.recharts-xAxis  .recharts-text,
+.recharts-yAxis  .recharts-text {
+  fill: var(--text-muted) !important;
+  font-size: 10px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+.recharts-legend-item-text {
+  color: var(--text-secondary) !important;
+  font-size: 10px !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+.recharts-default-tooltip {
+  background: var(--tooltip-bg) !important;
+  border: 1px solid var(--tooltip-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15) !important;
+  font-size: 11px !important;
+  color: var(--tooltip-text) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   KEYFRAMES
+   All animations used via inline styles must be defined here
+   (not only in tailwind.config.js) because Tailwind JIT only
+   emits @keyframes blocks when the corresponding animate-* class
+   appears in content files. Inline `style={{ animation: '...' }}`
+   bypasses Tailwind entirely — those keyframes live here.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Skeleton sweep — used in .ops-skeleton::after */
+@keyframes skeletonSweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Operational heartbeat — LiveIndicator, QueueMonitor service dots, FailureCenter */
+@keyframes pulseStatus {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: 0.3; transform: scale(0.85); }
+}
+
+/* KPI value flash — fires once on data update */
+@keyframes kpiFlash {
+  0%   { opacity: 1; }
+  18%  { opacity: 0.25; }
+  55%  { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+/* Atmospheric nebula drift — AnimatedBackground blobs (71 s / 89 s / 109 s inline) */
+@keyframes atmosphericDrift {
+  0%, 100% { transform: translate(0px,   0px); }
+  33%      { transform: translate(8px,  -5px); }
+  66%      { transform: translate(-5px,  7px); }
+}
+
+/* Telemetry particle — PipelineFlow connector dots */
+@keyframes telemetryDot {
+  0%   { transform: translateX(0px);  opacity: 0; }
+  12%  { transform: translateX(3px);  opacity: 1; }
+  88%  { transform: translateX(27px); opacity: 1; }
+  100% { transform: translateX(30px); opacity: 0; }
+}
+
+/*
+ * Service node status ring — ServiceTopology + ScannerConstellation.
+ * Uses transformBox:'fill-box' + transformOrigin:'center' on each
+ * SVG circle so scale anchors to the circle's own centre.
+ */
+@keyframes constellationPing {
+  0%         { transform: scale(1);    opacity: 0.65; }
+  65%, 100%  { transform: scale(1.85); opacity: 0; }
+}
+
+/*
+ * Subsystem breath — independent per-instance opacity oscillation.
+ * Range 0.82–1 is narrow enough to be subconscious; period and phase
+ * are set inline per element for full asynchrony.
+ */
+@keyframes subsystemBreath {
+  0%, 100% { opacity: 0.82; }
+  50%      { opacity: 1; }
+}
+
+/* Event row entry — used inline on EventStream rows with staggered delay */
+@keyframes entry {
+  0%   { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

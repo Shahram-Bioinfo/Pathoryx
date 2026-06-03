@@ -1,0 +1,82 @@
+# ============================================================
+# Pathoryx — .gitignore
+# ============================================================
+
+# --- Secrets / environment -------------------------------- #
+.env
+.env.local
+*.env
+
+# --- Python generated ------------------------------------- #
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# --- Test / lint cache ------------------------------------ #
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.coveragerc
+
+# --- Database files --------------------------------------- #
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Runtime data and outputs ----------------------------- #
+data/
+logs/
+*.log
+*.tmp
+
+# --- Generated reports / exports -------------------------- #
+*.xlsx
+*.xls
+*.pdf
+*.docx
+
+# --- Frontend build --------------------------------------- #
+dashboard-ui/node_modules/
+dashboard-ui/dist/
+dashboard-ui/.vite/
+
+# --- IDE and OS files ------------------------------------- #
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Docker --- ------------------------------------------- #
+*.override.yml
+
+# --- Alembic generated ------------------------------------ #
+# (keep migrations; ignore local downgrade scripts if any)
+
+# --- Claude Code internal --------------------------------- #
+.claude/
+
+# --- Keep .gitkeep files in data placeholders ------------ #
+!data/**/.gitkeep
+
+# Model weights — too large for plain git; manage via Git LFS or DVC
+models_weights/*.pth
+models_weights/*.pt
+models_weights/*.pkl
+models/*.npz
+models/*.pkl

@@ -1,0 +1,205 @@
+version: "3.9"
+
+# Pathoryx — local development docker-compose.
+#
+# Prerequisites:
+#   1. Copy .env.example to .env and fill in all required values.
+#   2. Run:  docker-compose up postgres -d   (wait for health check)
+#   3. Run:  docker-compose run --rm migrate
+#   4. Run:  docker-compose up
+#
+# Service ports:
+#   babelshark   health=8081  metrics=9091
+#   qc           health=8082  metrics=9092
+#   dicom        health=8083  metrics=9093
+#   uploader     health=8084  metrics=9094
+#   failed_watcher health=8085 metrics=9095
+#   prometheus   9090
+#   postgres     5432 (not exposed to host by default)
+
+x-common-env: &common-env
+  DATABASE_URL: ${DATABASE_URL}
+  PATHORYX_ENVIRONMENT: ${PATHORYX_ENVIRONMENT:-development}
+  PATHORYX_SERVICE_VERSION: ${PATHORYX_SERVICE_VERSION:-1.0.0}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+x-common: &common
+  restart: unless-stopped
+  networks:
+    - pathoryx_net
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pathoryx}
+      POSTGRES_USER: ${POSTGRES_USER:-pathoryx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - pathoryx_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pathoryx}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Alembic migration job (run once, then exit)
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.base
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *common-env
+    networks:
+      - pathoryx_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # BabelShark
+  # ---------------------------------------------------------------------------
+  babelshark:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.babelshark
+    environment:
+      <<: *common-env
+      BABELSHARK_CONFIG: ${BABELSHARK_CONFIG}
+      BABELSHARK_POLL_INTERVAL_SECONDS: ${BABELSHARK_POLL_INTERVAL_SECONDS:-60}
+      BABELSHARK_NEXT_STAGE: ${BABELSHARK_NEXT_STAGE:-qc}
+      PATHORYX_HEALTH_PORT: "8081"
+      PATHORYX_METRICS_PORT: "9091"
+    ports:
+      - "8081:8081"
+      - "9091:9091"
+    volumes:
+      - ${WATCH_FOLDER:-/data/watch}:/watch:ro
+      - ${STAGING_DIR:-/data/staging}:/staging
+
+  # ---------------------------------------------------------------------------
+  # QC service
+  # ---------------------------------------------------------------------------
+  qc:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.qc
+    environment:
+      <<: *common-env
+      QC_SERVICE_CONFIG: ${QC_SERVICE_CONFIG}
+      QC_MAX_WORKERS: ${QC_MAX_WORKERS:-2}
+      PATHORYX_HEALTH_PORT: "8082"
+      PATHORYX_METRICS_PORT: "9092"
+    ports:
+      - "8082:8082"
+      - "9092:9092"
+    volumes:
+      - ${STAGING_DIR:-/data/staging}:/staging:ro
+      - ${QC_MODEL_ROOT:-/data/models}:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ---------------------------------------------------------------------------
+  # DICOM conversion + upload
+  # ---------------------------------------------------------------------------
+  dicom:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dicom
+    environment:
+      <<: *common-env
+      DICOM_CONFIG: ${DICOM_CONFIG}
+      SECTRA_HOST: ${SECTRA_HOST}
+      SECTRA_PORT: ${SECTRA_PORT}
+      SECTRA_REMOTE_AE: ${SECTRA_REMOTE_AE}
+      SECTRA_LOCAL_AE: ${SECTRA_LOCAL_AE}
+      SECTRA_CSTORE_BATCH_SIZE: ${SECTRA_CSTORE_BATCH_SIZE:-500}
+      PATHORYX_HEALTH_PORT: "8083"
+      PATHORYX_METRICS_PORT: "9093"
+    ports:
+      - "8083:8083"
+      - "9093:9093"
+    volumes:
+      - ${STAGING_DIR:-/data/staging}:/staging:ro
+      - ${DICOM_OUTPUT_DIR:-/data/dicom}:/dicom
+
+  # ---------------------------------------------------------------------------
+  # Uploader
+  # ---------------------------------------------------------------------------
+  uploader:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.uploader
+    environment:
+      <<: *common-env
+      PATHORYX_HEALTH_PORT: "8084"
+      PATHORYX_METRICS_PORT: "9094"
+    ports:
+      - "8084:8084"
+      - "9094:9094"
+
+  # ---------------------------------------------------------------------------
+  # Failed Watcher
+  # ---------------------------------------------------------------------------
+  failed_watcher:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.failed_watcher
+    environment:
+      <<: *common-env
+      FAILED_WATCHER_FOLDERS: ${FAILED_WATCHER_FOLDERS}
+      FAILED_WATCHER_LABELS: ${FAILED_WATCHER_LABELS:-}
+      PATHORYX_HEALTH_PORT: "8085"
+      PATHORYX_METRICS_PORT: "9095"
+    ports:
+      - "8085:8085"
+      - "9095:9095"
+    volumes:
+      - ${WATCH_FOLDER:-/data/watch}:/watch:ro
+
+  # ---------------------------------------------------------------------------
+  # Prometheus (scrapes all service metrics)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - pathoryx_net
+    depends_on:
+      - babelshark
+      - qc
+      - dicom
+      - uploader
+      - failed_watcher
+
+networks:
+  pathoryx_net:
+    driver: bridge
+
+volumes:
+  postgres_data:

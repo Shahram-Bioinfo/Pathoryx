@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pathoryx-enterprise"
+version = "1.0.0"
+description = "Enterprise-grade whole-slide image ingestion, QC, DICOM delivery platform"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+
+dependencies = [
+    # Database
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13.0",
+    "psycopg2-binary>=2.9.9",
+
+    # Config
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+
+    # Observability
+    "structlog>=24.2.0",
+    "prometheus-client>=0.20.0",
+    "opentelemetry-api>=1.24.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.45b0",
+
+    # Resource metrics
+    "psutil>=5.9.8",
+
+    # Utilities
+    "click>=8.1.7",
+]
+
+[project.optional-dependencies]
+qc = [
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+    "Pillow>=10.3.0",
+    "numpy>=1.26.0",
+    "opencv-python-headless>=4.9.0",
+]
+dashboard = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-postgresql>=5.0.0",
+    "factory-boy>=3.3.0",
+    "coverage>=7.5.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    # Required for FastAPI TestClient
+    "httpx>=0.27.0",
+    "fastapi>=0.111.0",
+]
+
+[project.scripts]
+pathoryx-migrate    = "pathoryx_enterprise.db.migrations.cli:main"
+pathoryx-orchestrate = "pathoryx_enterprise.orchestrator.main:main"
+pathoryx-babelshark = "pathoryx_enterprise.services.babelshark.main:main"
+pathoryx-qc         = "pathoryx_enterprise.services.qc.main:main"
+pathoryx-dicom      = "pathoryx_enterprise.services.dicom.main:main"
+pathoryx-uploader   = "pathoryx_enterprise.services.uploader.main:main"
+pathoryx-failed-watcher = "pathoryx_enterprise.services.failed_watcher.main:main"
+pathoryx-recovery-sentry = "pathoryx_enterprise.services.recovery_sentry.main:main"
+pathoryx-health     = "pathoryx_enterprise.monitoring.http_health:main"
+pathoryx-dashboard  = "pathoryx_enterprise.services.dashboard.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pathoryx_enterprise*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+select = ["E", "F", "W", "I", "UP", "B", "C4", "PTH"]
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
