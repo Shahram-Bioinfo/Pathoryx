@@ -1,7 +1,11 @@
-import { apiFetch, apiPost } from './client'
+import { apiFetch, apiPatch, apiPost } from './client'
 import type {
+  AuditTrailResponse,
+  FilenameValidationResponse,
   LabelPreviewResponse,
   MonitoredFilesResponse,
+  ReviewStateUpdateRequest,
+  ReviewStateUpdateResponse,
   TechnicianRenameRequest,
   TechnicianRenameResponse,
   WatchFoldersResponse,
@@ -30,8 +34,22 @@ export const fetchMonitoredFiles = (params: MonitoredFilesParams = {}): Promise<
 export const fetchLabelPreview = (fileId: number): Promise<LabelPreviewResponse> =>
   apiFetch<LabelPreviewResponse>(`/recovery/files/${fileId}/label-preview`)
 
+export const fetchAuditTrail = (fileId: number): Promise<AuditTrailResponse> =>
+  apiFetch<AuditTrailResponse>(`/recovery/files/${fileId}/audit-trail`)
+
 export const postTechnicianRename = (
   fileId: number,
   body: TechnicianRenameRequest,
 ): Promise<TechnicianRenameResponse> =>
   apiPost<TechnicianRenameResponse>(`/recovery/files/${fileId}/technician-rename`, body)
+
+export const postValidateFilename = (
+  filename: string,
+): Promise<FilenameValidationResponse> =>
+  apiPost<FilenameValidationResponse>('/recovery/validate-filename', { filename })
+
+export const patchReviewState = (
+  changeId: number,
+  body: ReviewStateUpdateRequest,
+): Promise<ReviewStateUpdateResponse> =>
+  apiPatch<ReviewStateUpdateResponse>(`/recovery/changes/${changeId}/review-state`, body)

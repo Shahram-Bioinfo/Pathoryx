@@ -394,7 +394,58 @@ class TechnicianRenameResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Recovery — label preview
+# Recovery — structured filename validation
+# ---------------------------------------------------------------------------
+
+
+class ValidationComponent(BaseModel):
+    case_id: Optional[str] = None
+    pot: Optional[str] = None
+    block: Optional[str] = None
+    section: Optional[str] = None
+    stain: Optional[str] = None
+    timestamp: Optional[str] = None
+    extension: Optional[str] = None
+
+
+class ValidationIssue(BaseModel):
+    code: str
+    message: str
+
+
+class FilenameValidationRequest(BaseModel):
+    filename: str
+
+
+class FilenameValidationResponse(BaseModel):
+    filename: str
+    # valid | partially_valid | invalid
+    classification: str
+    components: Optional[ValidationComponent] = None
+    errors: list[ValidationIssue] = []
+    warnings: list[ValidationIssue] = []
+    suggested_correction: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Recovery — review state update
+# ---------------------------------------------------------------------------
+
+
+class ReviewStateUpdateRequest(BaseModel):
+    review_status: str
+    technician_note: Optional[str] = None
+
+
+class ReviewStateUpdateResponse(BaseModel):
+    change_id: int
+    previous_status: str
+    new_status: str
+    reviewed_at: str
+
+
+# ---------------------------------------------------------------------------
+# Recovery — label preview (enriched)
 # ---------------------------------------------------------------------------
 
 
@@ -407,10 +458,62 @@ class LabelPreviewResponse(BaseModel):
     case_id: Optional[str] = None
     scanner_id: Optional[str] = None
     scanner_vendor: Optional[str] = None
+    scanner_model: Optional[str] = None
     stain_type: Optional[str] = None
     suggested_filename: Optional[str] = None
     datamatrix_raw: Optional[str] = None
+    datamatrix_decode_status: Optional[str] = None
+    datamatrix_error: Optional[str] = None
+    stain_ocr_raw: Optional[str] = None
+    stain_matched: Optional[str] = None
+    stain_origin: Optional[str] = None
+    roi_case_number: Optional[str] = None
+    roi_lab_id: Optional[str] = None
+    roi_stain: Optional[str] = None
+    routing_type: Optional[str] = None
+    routing_reason: Optional[str] = None
+    original_filename: Optional[str] = None
     extraction_metadata: Optional[dict] = None
+
+
+# ---------------------------------------------------------------------------
+# Recovery — audit trail
+# ---------------------------------------------------------------------------
+
+
+class AuditChangeItem(BaseModel):
+    change_id: int
+    change_type: str
+    inferred_action: Optional[str] = None
+    old_filename: Optional[str] = None
+    new_filename: Optional[str] = None
+    old_path: Optional[str] = None
+    new_path: Optional[str] = None
+    review_status: Optional[str] = None
+    recovery_outcome: Optional[str] = None
+    recovery_reason: Optional[str] = None
+    technician_notes: Optional[str] = None
+    review_notes: Optional[str] = None
+    detected_at: Optional[str] = None
+    recovered_at: Optional[str] = None
+    requeued_at: Optional[str] = None
+    reviewed_at: Optional[str] = None
+
+
+class AuditEventItem(BaseModel):
+    event_id: int
+    event_type: str
+    service_name: str
+    occurred_at: Optional[str] = None
+    event_payload: Optional[dict] = None
+
+
+class AuditTrailResponse(BaseModel):
+    file_id: int
+    filename: Optional[str] = None
+    global_artifact_id: Optional[str] = None
+    changes: list[AuditChangeItem] = []
+    events: list[AuditEventItem] = []
 
 
 # ---------------------------------------------------------------------------

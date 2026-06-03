@@ -322,7 +322,47 @@ export interface TechnicianRenameResponse {
   validation_error: string | null
 }
 
-// ---- Recovery — label preview ----
+// ---- Recovery — filename validation ----
+
+export interface ValidationComponent {
+  case_id: string | null
+  pot: string | null
+  block: string | null
+  section: string | null
+  stain: string | null
+  timestamp: string | null
+  extension: string | null
+}
+
+export interface ValidationIssue {
+  code: string
+  message: string
+}
+
+export interface FilenameValidationResponse {
+  filename: string
+  classification: 'valid' | 'partially_valid' | 'invalid'
+  components: ValidationComponent | null
+  errors: ValidationIssue[]
+  warnings: ValidationIssue[]
+  suggested_correction: string | null
+}
+
+// ---- Recovery — review state update ----
+
+export interface ReviewStateUpdateRequest {
+  review_status: string
+  technician_note?: string
+}
+
+export interface ReviewStateUpdateResponse {
+  change_id: number
+  previous_status: string
+  new_status: string
+  reviewed_at: string
+}
+
+// ---- Recovery — label preview (enriched) ----
 
 export interface LabelPreviewResponse {
   file_id: number
@@ -333,10 +373,59 @@ export interface LabelPreviewResponse {
   case_id: string | null
   scanner_id: string | null
   scanner_vendor: string | null
+  scanner_model: string | null
   stain_type: string | null
   suggested_filename: string | null
   datamatrix_raw: string | null
+  datamatrix_decode_status: string | null
+  datamatrix_error: string | null
+  stain_ocr_raw: string | null
+  stain_matched: string | null
+  stain_origin: string | null
+  roi_case_number: string | null
+  roi_lab_id: string | null
+  roi_stain: string | null
+  routing_type: string | null
+  routing_reason: string | null
+  original_filename: string | null
   extraction_metadata: Record<string, unknown> | null
+}
+
+// ---- Recovery — audit trail ----
+
+export interface AuditChangeItem {
+  change_id: number
+  change_type: string
+  inferred_action: string | null
+  old_filename: string | null
+  new_filename: string | null
+  old_path: string | null
+  new_path: string | null
+  review_status: string | null
+  recovery_outcome: string | null
+  recovery_reason: string | null
+  technician_notes: string | null
+  review_notes: string | null
+  detected_at: string | null
+  recovered_at: string | null
+  requeued_at: string | null
+  reviewed_at: string | null
+}
+
+export interface AuditEventItem {
+  event_id: number
+  event_type: string
+  service_name: string
+  occurred_at: string | null
+  event_payload: Record<string, unknown> | null
+}
+
+export interface AuditTrailResponse {
+  file_id: number
+  filename: string | null
+  global_artifact_id: string | null
+  changes: AuditChangeItem[]
+  events: AuditEventItem[]
 }
 
 // ---- Services health ----

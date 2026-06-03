@@ -12,7 +12,13 @@ from typing import Optional
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from pathoryx_enterprise.db.models.babelshark import DatamatrixResult, ExtractionResult
+from pathoryx_enterprise.db.models.babelshark import (
+    DatamatrixResult,
+    ExtractionResult,
+    RoiResult,
+    SlideRoutingDecision,
+    StainResult,
+)
 from pathoryx_enterprise.db.models.core import (
     FileRecord,
     RunnerRegistration,
@@ -499,7 +505,13 @@ def get_monitored_file(session: Session, file_id: int) -> Optional[WatchedFolder
 
 def get_label_preview_data(session: Session, file_id: int) -> dict:
     """
-    Return label extraction / DataMatrix metadata for a watched folder file.
+    Return all label/extraction metadata for a watched folder file.
+
+    Aggregates: ExtractionResult, DatamatrixResult, StainResult, RoiResult,
+    SlideRoutingDecision.  The technician can immediately see what the system
+    parsed, what it could not parse, and why the artifact was routed to
+    failed/suspicious.
+
     Returns available=False gracefully when no linked record exists.
     """
     snap = session.execute(
@@ -507,7 +519,10 @@ def get_label_preview_data(session: Session, file_id: int) -> dict:
     ).scalar_one_or_none()
 
     if snap is None:
-        return {"file_id": file_id, "filename": None, "available": False, "unavailable_reason": "file_not_found"}
+        return {
+            "file_id": file_id, "filename": None,
+            "available": False, "unavailable_reason": "file_not_found",
+        }
 
     base: dict = {
         "file_id": file_id,
@@ -518,9 +533,21 @@ def get_label_preview_data(session: Session, file_id: int) -> dict:
         "unavailable_reason": None,
         "scanner_id": None,
         "scanner_vendor": None,
+        "scanner_model": None,
         "stain_type": None,
         "suggested_filename": snap.filename,
         "datamatrix_raw": None,
+        "datamatrix_decode_status": None,
+        "datamatrix_error": None,
+        "stain_ocr_raw": None,
+        "stain_matched": None,
+        "stain_origin": None,
+        "roi_case_number": None,
+        "roi_lab_id": None,
+        "roi_stain": None,
+        "routing_type": None,
+        "routing_reason": None,
+        "original_filename": snap.filename,
         "extraction_metadata": None,
     }
 
@@ -528,39 +555,168 @@ def get_label_preview_data(session: Session, file_id: int) -> dict:
         base["unavailable_reason"] = "no_linked_record"
         return base
 
-    ext_q = select(ExtractionResult)
-    if snap.file_record_internal_id:
-        ext_q = ext_q.where(ExtractionResult.file_record_internal_id == snap.file_record_internal_id)
-    else:
-        ext_q = ext_q.where(ExtractionResult.global_artifact_id == snap.global_artifact_id)
-    ext_row = session.execute(ext_q.order_by(ExtractionResult.internal_id.desc()).limit(1)).scalar_one_or_none()
+    def _q(model):
+        q = select(model)
+        if snap.file_record_internal_id:
+            q = q.where(model.file_record_internal_id == snap.file_record_internal_id)
+        else:
+            q = q.where(model.global_artifact_id == snap.global_artifact_id)
+        return q
 
+    # ExtractionResult — scanner identity + slide ID + intake decision
+    ext_row = session.execute(
+        _q(ExtractionResult).order_by(ExtractionResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
     if ext_row:
-        base["scanner_id"]   = ext_row.scanner_id
+        base["scanner_id"]    = ext_row.scanner_id
         base["scanner_vendor"] = ext_row.scanner_vendor
-        base["stain_type"]   = ext_row.stain_type
+        base["scanner_model"] = ext_row.scanner_model
+        base["stain_type"]    = ext_row.stain_type
         if ext_row.slide_id:
-            base["slide_id"]          = ext_row.slide_id
+            base["slide_id"]           = ext_row.slide_id
             base["suggested_filename"] = f"{ext_row.slide_id}{snap.extension or ''}"
         base["extraction_metadata"] = {
             "intake_decision":    ext_row.intake_decision,
+            "action_taken":       ext_row.action_taken,
             "extraction_status":  ext_row.extraction_status,
             "requires_qc":        ext_row.requires_qc,
+            "next_stage":         ext_row.next_stage,
         }
         base["available"] = True
 
-    dm_q = select(DatamatrixResult).where(DatamatrixResult.datamatrix_raw.isnot(None))
-    if snap.file_record_internal_id:
-        dm_q = dm_q.where(DatamatrixResult.file_record_internal_id == snap.file_record_internal_id)
-    else:
-        dm_q = dm_q.where(DatamatrixResult.global_artifact_id == snap.global_artifact_id)
-    dm_row = session.execute(dm_q.order_by(DatamatrixResult.internal_id.desc()).limit(1)).scalar_one_or_none()
-
+    # DatamatrixResult — raw barcode value and decode status
+    dm_row = session.execute(
+        _q(DatamatrixResult).order_by(DatamatrixResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
     if dm_row:
-        base["datamatrix_raw"] = dm_row.datamatrix_raw
-        base["available"] = True
+        base["datamatrix_raw"]           = dm_row.datamatrix_raw
+        base["datamatrix_decode_status"] = dm_row.decode_status
+        base["datamatrix_error"]         = dm_row.error_reason
+        if dm_row.datamatrix_raw:
+            base["available"] = True
+
+    # StainResult — OCR text and matched stain
+    stain_row = session.execute(
+        _q(StainResult).order_by(StainResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if stain_row:
+        base["stain_ocr_raw"]  = stain_row.raw_ocr_words
+        base["stain_matched"]  = stain_row.stain_final or stain_row.matched_word
+        base["stain_origin"]   = stain_row.stain_origin
+        base["available"]      = True
+
+    # RoiResult — fallback metadata extraction
+    roi_row = session.execute(
+        _q(RoiResult).order_by(RoiResult.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if roi_row:
+        base["roi_case_number"] = roi_row.case_number
+        base["roi_lab_id"]      = roi_row.lab_id
+        base["roi_stain"]       = roi_row.stain
+        base["available"]       = True
+
+    # SlideRoutingDecision — why it ended up in failed/suspicious
+    routing_row = session.execute(
+        _q(SlideRoutingDecision).order_by(SlideRoutingDecision.internal_id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if routing_row:
+        base["routing_type"]       = routing_row.routing_type
+        base["routing_reason"]     = routing_row.routing_reason
+        base["original_filename"]  = routing_row.original_filename or snap.filename
+        base["available"]          = True
+        # If the routing decision has a slide_id, prefer it for suggested filename
+        if routing_row.slide_id and not base.get("suggested_filename", snap.filename) != snap.filename:
+            base["suggested_filename"] = f"{routing_row.slide_id}{snap.extension or ''}"
 
     if not base["available"]:
         base["unavailable_reason"] = "no_extraction_result"
 
     return base
+
+
+def get_technician_change(
+    session: Session, change_id: int
+) -> Optional[TechnicianChange]:
+    return session.execute(
+        select(TechnicianChange).where(TechnicianChange.internal_id == change_id)
+    ).scalar_one_or_none()
+
+
+def get_artifact_audit_trail(session: Session, file_id: int) -> dict:
+    """
+    Return the complete audit history for a watched folder file.
+
+    Combines:
+      - All TechnicianChange records touching this file (by path or artifact ID)
+      - All PipelineEvents for the linked global_artifact_id
+
+    Items are ordered oldest-first so the UI can render a timeline.
+    """
+    snap = session.execute(
+        select(WatchedFolderSnapshot).where(WatchedFolderSnapshot.internal_id == file_id)
+    ).scalar_one_or_none()
+
+    if snap is None:
+        return {"file_id": file_id, "changes": [], "events": []}
+
+    # All TechnicianChange records for this file (by file_path match on new/old path)
+    changes_stmt = (
+        select(TechnicianChange)
+        .where(
+            (TechnicianChange.new_path == snap.file_path) |
+            (TechnicianChange.old_path == snap.file_path) |
+            (
+                (snap.global_artifact_id is not None) &
+                (TechnicianChange.global_artifact_id == snap.global_artifact_id)
+            )
+        )
+        .order_by(TechnicianChange.detected_at.asc())
+    )
+    change_rows = session.execute(changes_stmt).scalars().all()
+
+    changes = []
+    for c in change_rows:
+        changes.append({
+            "change_id":       c.internal_id,
+            "change_type":     c.change_type,
+            "inferred_action": c.inferred_action,
+            "old_filename":    c.old_filename,
+            "new_filename":    c.new_filename,
+            "old_path":        c.old_path,
+            "new_path":        c.new_path,
+            "review_status":   c.review_status,
+            "recovery_outcome": c.recovery_outcome,
+            "recovery_reason": c.recovery_reason,
+            "technician_notes": c.technician_notes,
+            "review_notes":    c.review_notes,
+            "detected_at":     c.detected_at.isoformat() if c.detected_at else None,
+            "recovered_at":    c.recovered_at.isoformat() if c.recovered_at else None,
+            "requeued_at":     c.requeued_at.isoformat() if c.requeued_at else None,
+            "reviewed_at":     c.reviewed_at.isoformat() if c.reviewed_at else None,
+        })
+
+    # PipelineEvents for the linked artifact
+    events = []
+    if snap.global_artifact_id:
+        event_rows = session.execute(
+            select(PipelineEvent)
+            .where(PipelineEvent.global_artifact_id == snap.global_artifact_id)
+            .order_by(PipelineEvent.occurred_at.asc())
+            .limit(100)
+        ).scalars().all()
+        for e in event_rows:
+            events.append({
+                "event_id":    e.event_id,
+                "event_type":  e.event_type,
+                "service_name": e.service_name,
+                "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
+                "event_payload": e.event_payload,
+            })
+
+    return {
+        "file_id":           file_id,
+        "filename":          snap.filename,
+        "global_artifact_id": snap.global_artifact_id,
+        "changes":           changes,
+        "events":            events,
+    }

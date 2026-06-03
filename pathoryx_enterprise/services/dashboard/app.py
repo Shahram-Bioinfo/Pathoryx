@@ -24,14 +24,17 @@ from pathoryx_enterprise.db.session import get_session
 from . import sse as _sse
 
 from . import queries as q
-from .actions import ActionError, execute_technician_rename
+from .actions import ActionError, execute_technician_rename, update_review_state, validate_filename_structured
 from .schemas import (
+    AuditTrailResponse,
     ConversionResultSummary,
     EventItem,
     EventListResponse,
     ExtractionResultSummary,
     FailedSlideItem,
     FailedTriggerItem,
+    FilenameValidationRequest,
+    FilenameValidationResponse,
     FailuresResponse,
     LabelPreviewResponse,
     MonitoredFileItem,
@@ -43,6 +46,8 @@ from .schemas import (
     RecoveryEventItem,
     RecoveryItem,
     RecoveryResponse,
+    ReviewStateUpdateRequest,
+    ReviewStateUpdateResponse,
     RunnerItem,
     RunnerStatusCounts,
     ServicesHealthResponse,
@@ -55,6 +60,8 @@ from .schemas import (
     TriggerItem,
     TriggerStatusCounts,
     UploadResultSummary,
+    ValidationComponent,
+    ValidationIssue,
     WatchFolderSummary,
     WatchFoldersResponse,
 )
@@ -156,6 +163,41 @@ DbDep = Annotated[Session, Depends(get_db)]
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
+
+
+def _resolve_label_root_dir() -> Optional[Path]:
+    """
+    Resolve the BabelShark label_root_dir from config.
+
+    Reads BABELSHARK_CONFIG_PATH (or BABELSHARK_CONFIG) env var, loads the
+    YAML, and returns the label_root_dir path.  Returns None if the config
+    is not available — the caller should return HTTP 404 gracefully.
+    """
+    import os
+    import yaml
+
+    config_path_str = (
+        os.environ.get("BABELSHARK_CONFIG_PATH")
+        or os.environ.get("BABELSHARK_CONFIG")
+    )
+    if not config_path_str:
+        # Try known default locations
+        for candidate in ("configs/babelshark_config.yaml", "./configs/babelshark_config.yaml"):
+            if Path(candidate).exists():
+                config_path_str = candidate
+                break
+
+    if not config_path_str:
+        return None
+
+    try:
+        with open(config_path_str) as fh:
+            cfg = yaml.safe_load(fh) or {}
+        label_root = cfg.get("label_root_dir")
+        return Path(label_root) if label_root else None
+    except Exception as exc:
+        logger.debug("_resolve_label_root_dir: could not load config: %s", exc)
+        return None
 
 
 def create_app() -> FastAPI:
@@ -642,9 +684,141 @@ def create_app() -> FastAPI:
             data = q.get_label_preview_data(db, file_id)
         except Exception as exc:
             logger.warning("label_preview: query failed: %s", exc)
-            data = {"file_id": file_id, "filename": None, "available": False, "unavailable_reason": "query_failed"}
-
+            data = {
+                "file_id": file_id, "filename": None,
+                "available": False, "unavailable_reason": "query_failed",
+            }
         return LabelPreviewResponse(**data)
+
+    # ------------------------------------------------------------------
+    # POST /dashboard/api/recovery/validate-filename
+    # ------------------------------------------------------------------
+    @app.post(
+        "/dashboard/api/recovery/validate-filename",
+        response_model=FilenameValidationResponse,
+    )
+    def validate_filename(body: FilenameValidationRequest) -> FilenameValidationResponse:
+        """
+        Validate a proposed filename against the Pathoryx slide ID parser rules.
+
+        Safe to call on every keystroke — no filesystem or DB side-effects.
+        Returns structured components so the UI can show field-level feedback.
+        """
+        result = validate_filename_structured(body.filename)
+        components = None
+        if result["components"]:
+            c = result["components"]
+            components = ValidationComponent(
+                case_id=c.get("case_id"),
+                pot=c.get("pot"),
+                block=c.get("block"),
+                section=c.get("section"),
+                stain=c.get("stain"),
+                timestamp=c.get("timestamp"),
+                extension=c.get("extension"),
+            )
+        return FilenameValidationResponse(
+            filename=result["filename"],
+            classification=result["classification"],
+            components=components,
+            errors=[ValidationIssue(**e) for e in result["errors"]],
+            warnings=[ValidationIssue(**w) for w in result["warnings"]],
+            suggested_correction=result.get("suggested_correction"),
+        )
+
+    # ------------------------------------------------------------------
+    # PATCH /dashboard/api/recovery/changes/{change_id}/review-state
+    # ------------------------------------------------------------------
+    @app.patch(
+        "/dashboard/api/recovery/changes/{change_id}/review-state",
+        response_model=ReviewStateUpdateResponse,
+    )
+    def update_change_review_state(
+        change_id: int,
+        body: ReviewStateUpdateRequest,
+    ) -> ReviewStateUpdateResponse:
+        """
+        Transition a TechnicianChange to a new review_status.
+
+        Enforces the allowed transition table.  Each transition emits an
+        immutable PipelineEvent so the full history is auditable.
+        """
+        try:
+            result = update_review_state(
+                change_id=change_id,
+                new_status=body.review_status,
+                technician_note=body.technician_note,
+            )
+        except ActionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.error("update_change_review_state: %s", exc)
+            raise HTTPException(status_code=500, detail="Review state update failed") from exc
+
+        return ReviewStateUpdateResponse(**result)
+
+    # ------------------------------------------------------------------
+    # GET /dashboard/api/recovery/files/{file_id}/label-image
+    # ------------------------------------------------------------------
+    @app.get("/dashboard/api/recovery/files/{file_id}/label-image")
+    def label_image(file_id: int, db: DbDep):
+        """
+        Serve the extracted label image for a watched folder file.
+
+        Looks up the label_root_dir from the BabelShark config, then searches
+        for common image formats matching the file's stem.
+
+        Returns 404 with a JSON reason when no image is found.
+        """
+        from fastapi.responses import FileResponse
+
+        snapshot = q.get_monitored_file(db, file_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="File not found in watched folders")
+
+        stem = Path(snapshot.filename).stem
+
+        label_dir = _resolve_label_root_dir()
+        if label_dir is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Label directory not configured (BABELSHARK_CONFIG_PATH not set)",
+            )
+
+        for suffix in (".jpg", ".jpeg", ".png", ".tif"):
+            candidate = label_dir / f"{stem}{suffix}"
+            if candidate.exists():
+                return FileResponse(
+                    path=str(candidate),
+                    media_type=f"image/{'jpeg' if suffix in ('.jpg', '.jpeg') else suffix.lstrip('.')}",
+                    headers={"Cache-Control": "max-age=3600"},
+                )
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"No label image found for '{snapshot.filename}' in {label_dir}",
+        )
+
+    # ------------------------------------------------------------------
+    # GET /dashboard/api/recovery/files/{file_id}/audit-trail
+    # ------------------------------------------------------------------
+    @app.get(
+        "/dashboard/api/recovery/files/{file_id}/audit-trail",
+        response_model=AuditTrailResponse,
+    )
+    def audit_trail(db: DbDep, file_id: int) -> AuditTrailResponse:
+        """
+        Return the complete audit history for a watched folder file.
+
+        Includes all TechnicianChange records and linked PipelineEvents, ordered
+        chronologically so the UI can render a recovery timeline.
+        """
+        try:
+            data = q.get_artifact_audit_trail(db, file_id)
+        except Exception as exc:
+            logger.warning("audit_trail: query failed: %s", exc)
+            data = {"file_id": file_id, "changes": [], "events": []}
+        return AuditTrailResponse(**data)
 
     # ------------------------------------------------------------------
     # GET /dashboard/api/services/health
