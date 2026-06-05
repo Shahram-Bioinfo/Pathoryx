@@ -1,7 +1,8 @@
 # =============================================================================
-# PRODUCTION REFERENCE — DO NOT USE FOR TESTING
+# PRODUCTION REFERENCE — DO NOT USE FOR TESTING OR WINDOWS SETUP
 # This config reflects the live Sectra C-STORE production environment.
-# For Windows test setup, use dicom_config.yaml instead.
+# For testing (Linux or Windows), use dicom_config.yaml instead.
+# dicom_config.yaml has upload.dry_run=true and cstore.upload_via_c_store=false.
 # =============================================================================
 
 dicom_service:

@@ -32,13 +32,13 @@ CREATE USER pathoryx_user WITH PASSWORD 'CHANGE_THIS_PASSWORD';
 ## 2. Create the database
 
 ```bash
-sudo -u postgres createdb -O pathoryx_user pathoryx_enterprise
+sudo -u postgres createdb -O pathoryx_user pathoryx
 ```
 
 Verify connection:
 
 ```bash
-psql "postgresql://pathoryx_user:CHANGE_THIS_PASSWORD@localhost:5432/pathoryx_enterprise" -c "SELECT version();"
+psql "postgresql://pathoryx_user:CHANGE_THIS_PASSWORD@localhost:5432/pathoryx" -c "SELECT version();"
 ```
 
 ## 3. Enable required extensions
@@ -46,7 +46,7 @@ psql "postgresql://pathoryx_user:CHANGE_THIS_PASSWORD@localhost:5432/pathoryx_en
 Connect as superuser (extensions require superuser):
 
 ```bash
-sudo -u postgres psql pathoryx_enterprise
+sudo -u postgres psql pathoryx
 ```
 
 ```sql
@@ -60,7 +60,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 In your `.env` file:
 
 ```
-DATABASE_URL=postgresql://pathoryx_user:CHANGE_THIS_PASSWORD@localhost:5432/pathoryx_enterprise
+DATABASE_URL=postgresql://pathoryx_user:CHANGE_THIS_PASSWORD@localhost:5432/pathoryx
 ```
 
 ## 5. Run Alembic migrations
@@ -96,7 +96,7 @@ After the migration, grant only the permissions each service needs:
 
 ```sql
 -- Connect as postgres superuser
-sudo -u postgres psql pathoryx_enterprise
+sudo -u postgres psql pathoryx
 
 GRANT USAGE ON SCHEMA core, events, qc, babelshark, dicomizer, uploader, failed_watcher, audit
   TO pathoryx_user;
@@ -132,7 +132,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA audit TO pathoryx_user;
 
 ```sql
 -- Connect as pathoryx_user
-psql "postgresql://pathoryx_user:CHANGE_THIS_PASSWORD@localhost:5432/pathoryx_enterprise"
+psql "postgresql://pathoryx_user:CHANGE_THIS_PASSWORD@localhost:5432/pathoryx"
 
 \dn          -- list schemas
 \dt core.*   -- list core tables
@@ -165,11 +165,11 @@ SHOW max_connections;
 
 ```bash
 # Backup
-pg_dump -U pathoryx_user -F c pathoryx_enterprise > backup_$(date +%Y%m%d).dump
+pg_dump -U pathoryx_user -F c pathoryx > backup_$(date +%Y%m%d).dump
 
 # Restore to a fresh database
-createdb -O pathoryx_user pathoryx_enterprise_restore
-pg_restore -U pathoryx_user -d pathoryx_enterprise_restore backup_20260527.dump
+createdb -O pathoryx_user pathoryx_restore
+pg_restore -U pathoryx_user -d pathoryx_restore backup_$(date +%Y%m%d).dump
 ```
 
 ## Troubleshooting
