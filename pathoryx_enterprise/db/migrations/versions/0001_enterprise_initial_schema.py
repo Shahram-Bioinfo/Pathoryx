@@ -21,7 +21,14 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # ── Extensions ──────────────────────────────────────────────────────────
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+    # pg_stat_statements requires superuser; use SAVEPOINT so failure doesn't
+    # abort the whole migration transaction.
+    op.execute("SAVEPOINT ext_pg_stat")
+    try:
+        op.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+    except Exception:
+        op.execute("ROLLBACK TO SAVEPOINT ext_pg_stat")
+    op.execute("RELEASE SAVEPOINT ext_pg_stat")
 
     # ── Schemas ──────────────────────────────────────────────────────────────
     for schema in ("core", "events", "ops", "babelshark", "qc", "dicomizer", "uploader", "failed_watcher"):
