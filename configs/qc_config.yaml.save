@@ -1,0 +1,64 @@
+# =============================================================================
+# Pathoryx — QC Inference Configuration
+# Windows Test Environment
+# =============================================================================
+
+paths:
+  output_root: "./models_weights/data/qc_output"
+  quarantine_root: "C:/Users/Public/projects/Pathoryx/data/quarantine"
+
+pipeline:
+  pipeline_name: slide_qc_service
+  target_system: pathoryx
+
+watcher:
+  input_dirs:
+    - data/watch"
+  poll_interval_seconds: 10
+  recursive: true
+  stable_file_wait_seconds: 20
+  allowed_extensions:
+    - ".svs"
+    - ".tif"
+    - ".tiff"
+    - ".ndpi"
+    - ".mrxs"
+    - ".vms"
+
+
+  penmark_weights: "./models_weights/penmark_detection_MobileNetV3.pth"
+  bubble_weights: "./models_weights/bubble_detection_ConvNeXtTiny_model.pth"
+  stain_weights: "./models_weights/stain_model_MobileNetV3.pth"
+  blur_weights: "./models_weights/blur_detection_resnet18_old.pth"
+
+modules:
+  enable_stain: true
+  enable_penmark: true
+  enable_bubble: false
+  enable_blur: true
+  enable_sharpness: true
+
+parameters:
+  thumb_size: 1024
+  patch_size: 224
+  stride: 112
+  batch_size: 16
+
+thresholds:
+  penmark_threshold: 0.01
+  bubble_threshold: 0.02
+  min_tissue_ratio: 0.03
+  sat_threshold: 0.01
+
+artifacts:
+  save_csv: true
+  save_visualizations: true
+
+processing:
+  force_reprocess: false
+
+logging:
+  level: INFO
+
+postgres:
+  url: ${DATABASE_URL}

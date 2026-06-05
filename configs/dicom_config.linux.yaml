@@ -1,0 +1,226 @@
+# =============================================================================
+# Pathoryx — DICOM Service Configuration
+# Windows Test Environment
+#
+# Upload is DRY-RUN by default for initial testing.
+# To enable real Sectra C-STORE upload:
+#   1. Confirm network: ping path-pacs2 && Test-NetConnection path-pacs2 -Port 32001
+#   2. Set  upload.dry_run: false
+#   3. Set  cstore.upload_via_c_store: true
+#
+# WARNING: Never test with patient-sensitive slides unless explicitly approved
+#          by your data governance officer.
+# =============================================================================
+
+dicom_service:
+  perform_upload: false
+
+paths:
+  input_dirs:
+    - "/home/shahram/Pathoryx-Enterprise/data/final"
+  output_root: "/home/shahram/Pathoryx-Enterprise/data/dicom_output"
+
+cleanup:
+  delete_after_x_days: null
+  dirs_to_clean_up: []
+
+conversion:
+  image_conversion_method: "ids7_compatible_dcm"
+  image_convertion_method: "xraydcm"
+  allow_placeholder_copy: false
+  supported_extensions:
+    - ".svs"
+    - ".tif"
+    - ".tiff"
+    - ".ndpi"
+    - ".mrxs"
+    - ".vms"
+    - ".dcm"
+    - ".jpeg"
+    - ".jpg"
+    - ".png"
+  redicomize_when_hash_changed: false
+  preserve_original_input: true
+
+dicomize:
+  enable_patient_info_retrieval_from_LIS: false
+  redicomize_when_hash_changed: false
+  image_convertion_method: "xraydcm"
+
+dcmtk:
+  bin_dir: ""
+  dcmodify_path: ""
+  dcmdump_path: ""
+
+lis:
+  enabled: false
+  enrich_case_metadata: false
+  # Credentials loaded from environment variables — never hardcoded.
+  sql_server: ${LIS_SQL_SERVER}
+  username: ${LIS_SQL_USERNAME}
+  password: ${LIS_SQL_PASSWORD}
+  query_timeout_seconds: 15
+
+wsidicomizer:
+  enabled: true
+  executable: wsidicomizer
+  prefer_cli: true
+  workers: null
+  timeout_seconds: 7200
+
+# =============================================================================
+# Upload — DRY-RUN for initial Windows testing
+# Set dry_run: false only after verifying network connectivity to PACS.
+# =============================================================================
+upload:
+  dry_run: true           # ← change to false to enable real upload
+  timeout_seconds: 1800
+  max_retries: 2
+  retry_backoff_seconds: 10
+
+# =============================================================================
+# C-STORE — disabled for initial testing
+# These are site-specific values — update for your PACS configuration.
+#   peer_ip:      hostname or IP of the Sectra PACS server
+#   default_peer_port: DICOM C-STORE port (Sectra default: 32001)
+#   sec_dcm_bin:  path to Sectra ImageTools bin directory on the Windows host
+# =============================================================================
+cstore:
+  upload_via_c_store: false   # ← change to true to enable real C-STORE
+  peer_ip: "path-pacs2"       # ← site-specific: replace with your PACS hostname/IP
+  default_peer_port: "32001"  # ← site-specific: replace with your PACS C-STORE port
+  sec_dcm_bin: "C:\\Program Files\\Sectra\\ImageTools\\bin"  # ← Windows path to Sectra bin
+  file_type_dependent_ports:
+    "32000":
+      - ".svs"
+      - "wsidcm"
+    "32001":
+      - ".svs"
+      - ".ndpi"
+      - ".dcm"
+      - "wsidcm"
+    "32002":
+      - ".jpeg"
+      - ".tif"
+      - ".jpg"
+      - ".png"
+
+match_construct_patterns:
+  lis_pattern:
+    match: '(?P<case_id>[A-Za-z0-9]{12})(?P<specimen>[A-Z])(-|_)(?P<block>[0-9]+)(-|_)(?P<slide>[A-Za-z0-9]+)(?:(-|_)(?P<staining>[^\s_]+))?'
+    zerofill: {}
+    construct:
+      slide_id:
+        - "{case_id}{specimen}-{block}-{slide}"
+      label:
+        - "{case_id}{specimen}-{block}-{slide}"
+      accession_number:
+        - "{case_id}"
+      study_id:
+        - "{case_id}"
+      specimen_box:
+        - "{specimen}"
+      block:
+        - "{block}"
+      slide_num:
+        - "{slide}"
+      staining:
+        - "{staining}"
+        - "Unknown"
+
+  heidelberg_standard:
+    match: '(?P<department>[A-Z])(?P<year>[0-9]{4})(?P<case>[0-9]{6})SA-(?P<specimen>[0-9]+)-(?P<block>[0-9]+)-(?P<staining>[^_]+)'
+    zerofill:
+      case: 6
+    default:
+      staining: "Unknown"
+    construct:
+      study_id:
+        - "{department}{year}{case}"
+      accession_number:
+        - "{department}{year}{case}"
+      slide_id:
+        - "{department}{year}{case}SA-{specimen}-{block}-{staining}"
+      label:
+        - "{department}{year}{case}SA-{specimen}-{block}-{staining}"
+      specimen_box:
+        - "A"
+      block:
+        - "{specimen}"
+      slide_num:
+        - "{block}"
+      staining:
+        - "{staining}"
+        - "Unknown"
+
+  img_naming_pattern:
+    match: '(?P<department>[A-Z])((_|\/|-){0,1})((?P<year_long>[0-9]{4})|(?P<year_short>[0-9]{2}))(_|\/|-)(?P<case>[0-9]+)(?:(_|\/|-)(?P<stain>[A-Za-z0-9-]+))?(?:(_|\/)(?P<Box>[A-Za-z]))?(?:(?P<block>[0-9]+))?'
+    default:
+      stain: "Unknown"
+      block: "1"
+      Box: "A"
+    zerofill:
+      case: 6
+    construct:
+      slide_id:
+        - "{department}20{year_short}{case}S{Box}-{block}-80{stain}"
+        - "{department}20{year_short}{case}SA-{block}-80{stain}"
+        - "{department}{year_long}{case}S{Box}-{block}-80{stain}"
+        - "{department}{year_long}{case}SA-{block}-80{stain}"
+      label:
+        - "{department}20{year_short}{case}S{Box}-{block}-80{stain}"
+        - "{department}20{year_short}{case}SA-{block}-80{stain}"
+        - "{department}{year_long}{case}S{Box}-{block}-80{stain}"
+        - "{department}{year_long}{case}SA-{block}-80{stain}"
+      accession_number:
+        - "{department}20{year_short}{case}S"
+        - "{department}{year_long}{case}S"
+      study_id:
+        - "{department}20{year_short}{case}S"
+        - "{department}{year_long}{case}S"
+      specimen_box:
+        - "{Box}"
+        - "A"
+      block:
+        - "{block}"
+        - "1"
+      slide_num:
+        - "80{stain}"
+      staining:
+        - "{stain}"
+        - "Unknown"
+
+  faxitron_pattern:
+    match: '(?P<department>[A-Z])(_|\/|-)(?P<case>[0-9]+)((_|\/|-){0,1})((?P<year_long>[0-9]{4})|(?P<year_short>[0-9]{2}))(?:(_|\/|-)(?P<stain>[A-Za-z0-9-]+))?(?:(_|\/)(?P<Box>[A-Za-z]))?(?:(?P<block>[0-9]+))?'
+    default:
+      stain: "Unknown"
+      block: "1"
+      Box: "A"
+    zerofill:
+      case: 6
+    construct:
+      accession_number:
+        - "{department}20{year_short}{case}S"
+        - "{department}{year_long}{case}S"
+      study_id:
+        - "{department}20{year_short}{case}S"
+        - "{department}{year_long}{case}S"
+      slide_id:
+        - "{department}20{year_short}{case}S{Box}-{block}-80{stain}"
+        - "{department}20{year_short}{case}SA-{block}-80{stain}"
+        - "{department}{year_long}{case}S{Box}-{block}-80{stain}"
+        - "{department}{year_long}{case}SA-{block}-80{stain}"
+      label:
+        - "{department}20{year_short}{case}S{Box}-{block}-80{stain}"
+        - "{department}20{year_short}{case}SA-{block}-80{stain}"
+      specimen_box:
+        - "{Box}"
+        - "A"
+      block:
+        - "{block}"
+        - "1"
+      slide_num:
+        - "80{stain}"
+      staining:
+        - "{stain}"
+        - "Unknown"

@@ -179,14 +179,8 @@ DbDep = Annotated[Session, Depends(get_db)]
 # ---------------------------------------------------------------------------
 
 
-def _resolve_label_root_dir() -> Optional[Path]:
-    """
-    Resolve the BabelShark label_root_dir from config.
-
-    Reads BABELSHARK_CONFIG_PATH (or BABELSHARK_CONFIG) env var, loads the
-    YAML, and returns the label_root_dir path.  Returns None if the config
-    is not available — the caller should return HTTP 404 gracefully.
-    """
+def _load_babelshark_config() -> dict:
+    """Load babelshark YAML config. Returns {} on any failure."""
     import os
     import yaml
 
@@ -195,23 +189,92 @@ def _resolve_label_root_dir() -> Optional[Path]:
         or os.environ.get("BABELSHARK_CONFIG")
     )
     if not config_path_str:
-        # Try known default locations
         for candidate in ("configs/babelshark_config.yaml", "./configs/babelshark_config.yaml"):
             if Path(candidate).exists():
                 config_path_str = candidate
                 break
-
     if not config_path_str:
-        return None
-
+        return {}
     try:
         with open(config_path_str) as fh:
-            cfg = yaml.safe_load(fh) or {}
-        label_root = cfg.get("label_root_dir")
-        return Path(label_root) if label_root else None
+            return yaml.safe_load(fh) or {}
     except Exception as exc:
-        logger.debug("_resolve_label_root_dir: could not load config: %s", exc)
-        return None
+        logger.debug("_load_babelshark_config: %s", exc)
+        return {}
+
+
+def _build_label_search_dirs(cfg: dict) -> list[Path]:
+    """
+    Return an ordered list of directories to search for label-crop images.
+
+    Priority:
+      1. Configured run_output_dir → date subdirs (newest first) → label_crops/
+      2. Configured run_output_dir → date subdirs → failed_datamatrix/
+      3. Configured label_crops_dir (flat)
+      4. Configured label_root_dir (legacy)
+      5. data/run_output/ relative to CWD → same pattern  (Linux/dev fallback)
+      6. data/label_crops/ and data/labels/ relative to CWD
+
+    The double pass (config + CWD fallback) means this works on both Windows
+    (configured paths exist) and Linux dev (CWD-relative data/ exists).
+    """
+    dirs: list[Path] = []
+
+    def _add_run_output_subdirs(base: Path) -> None:
+        if not base.exists():
+            return
+        try:
+            date_dirs = sorted(
+                [d for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")],
+                reverse=True,  # most recent first
+            )
+        except PermissionError:
+            return
+        for dd in date_dirs:
+            dirs.append(dd / "label_crops")
+            dirs.append(dd / "failed_datamatrix")
+
+    # 1-2. Configured run_output_dir
+    if cfg.get("run_output_dir"):
+        _add_run_output_subdirs(Path(cfg["run_output_dir"]))
+
+    # 3. Configured label_crops_dir
+    if cfg.get("label_crops_dir"):
+        dirs.append(Path(cfg["label_crops_dir"]))
+
+    # 4. Configured label_root_dir
+    if cfg.get("label_root_dir"):
+        dirs.append(Path(cfg["label_root_dir"]))
+
+    # 5. CWD-relative fallback (Linux dev / CI)
+    _add_run_output_subdirs(Path("data/run_output"))
+
+    # 6. Flat fallback dirs
+    dirs.extend([Path("data/label_crops"), Path("data/labels")])
+
+    return dirs
+
+
+def _label_allowed_roots(cfg: dict) -> list[Path]:
+    """
+    Compute the set of roots within which label images may be served.
+    Prevents path traversal: any resolved candidate outside these roots is rejected.
+    """
+    roots: list[Path] = []
+    # data/ relative to CWD is always permitted
+    cwd_data = Path("data").resolve()
+    if cwd_data.exists():
+        roots.append(cwd_data)
+    # Configured output roots
+    for key in ("run_output_dir", "label_crops_dir", "label_root_dir"):
+        if cfg.get(key):
+            p = Path(cfg[key])
+            if p.exists():
+                roots.append(p.resolve())
+    # Absolute fallback so at least something is in the list
+    if not roots:
+        roots.append(Path("/").resolve())
+    return roots
 
 
 def create_app() -> FastAPI:
@@ -843,40 +906,62 @@ def create_app() -> FastAPI:
     @app.get("/dashboard/api/recovery/files/{file_id}/label-image")
     def label_image(file_id: int, db: DbDep):
         """
-        Serve the extracted label image for a watched folder file.
+        Serve the extracted label-crop image for a watched folder file.
 
-        Looks up the label_root_dir from the BabelShark config, then searches
-        for common image formats matching the file's stem.
+        Search order (newest-date-first within each run_output tree):
+          1. run_output_dir/{date}/label_crops/{stem}.{ext}   (configured)
+          2. run_output_dir/{date}/failed_datamatrix/{stem}.{ext}
+          3. label_crops_dir/{stem}.{ext}                     (configured, flat)
+          4. label_root_dir/{stem}.{ext}                      (configured, legacy)
+          5. data/run_output/{date}/label_crops/{stem}.{ext}  (CWD fallback)
+          6. data/run_output/{date}/failed_datamatrix/{stem}.{ext}
+          7. data/label_crops/{stem}.{ext}
+          8. data/labels/{stem}.{ext}
 
-        Returns 404 with a JSON reason when no image is found.
+        All candidates are checked against allowed roots to prevent path traversal.
+        Returns 404 with a structured reason when nothing is found.
         """
         from fastapi.responses import FileResponse
+        from pathoryx_enterprise.utils.path_validation import is_path_safe, sanitize_filename
 
         snapshot = q.get_monitored_file(db, file_id)
         if snapshot is None:
             raise HTTPException(status_code=404, detail="File not found in watched folders")
 
-        stem = Path(snapshot.filename).stem
+        raw_stem = Path(snapshot.filename).stem
+        safe_stem = sanitize_filename(raw_stem)
+        if not safe_stem:
+            raise HTTPException(status_code=400, detail="Invalid filename stem")
 
-        label_dir = _resolve_label_root_dir()
-        if label_dir is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Label directory not configured (BABELSHARK_CONFIG_PATH not set)",
-            )
+        cfg = _load_babelshark_config()
+        search_dirs = _build_label_search_dirs(cfg)
+        allowed_roots = _label_allowed_roots(cfg)
 
-        for suffix in (".jpg", ".jpeg", ".png", ".tif"):
-            candidate = label_dir / f"{stem}{suffix}"
-            if candidate.exists():
+        for directory in search_dirs:
+            if not directory.exists():
+                continue
+            for suffix in (".png", ".jpg", ".jpeg", ".tif"):
+                candidate = directory / f"{safe_stem}{suffix}"
+                if not candidate.exists():
+                    continue
+                if not is_path_safe(candidate, allowed_roots):
+                    logger.warning(
+                        "label_image: candidate %s rejected by path validation", candidate
+                    )
+                    continue
+                media = (
+                    "image/jpeg" if suffix in (".jpg", ".jpeg")
+                    else f"image/{suffix.lstrip('.')}"
+                )
                 return FileResponse(
                     path=str(candidate),
-                    media_type=f"image/{'jpeg' if suffix in ('.jpg', '.jpeg') else suffix.lstrip('.')}",
+                    media_type=media,
                     headers={"Cache-Control": "max-age=3600"},
                 )
 
         raise HTTPException(
             status_code=404,
-            detail=f"No label image found for '{snapshot.filename}' in {label_dir}",
+            detail=f"No label image found for '{snapshot.filename}'",
         )
 
     # ------------------------------------------------------------------

@@ -14,7 +14,7 @@ Covers:
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+from pathlib import Path  # noqa: F401  — used in test patches
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -446,22 +446,24 @@ class TestTerminalState:
 # ---------------------------------------------------------------------------
 
 class TestLabelPreviewDegrades:
-    def test_missing_label_dir_returns_404_not_500(self, client):
-        """If label image cannot be found the endpoint returns 404, not 500."""
+    def test_no_label_dirs_returns_404_not_500(self, client):
+        """If no search dirs exist and no image is found, the endpoint returns 404 (not 500)."""
         snap = MagicMock()
         snap.filename = "N2024002863SA-1-1-H&E.svs"
 
         with (
             patch(_QUERY_MODULE + ".get_monitored_file", return_value=snap),
-            patch(
-                "pathoryx_enterprise.services.dashboard.app._resolve_label_root_dir",
-                return_value=None,
-            ),
+            patch("pathoryx_enterprise.services.dashboard.app._build_label_search_dirs",
+                  return_value=[]),
+            patch("pathoryx_enterprise.services.dashboard.app._label_allowed_roots",
+                  return_value=[Path("/tmp")]),
+            patch("pathoryx_enterprise.services.dashboard.app._load_babelshark_config",
+                  return_value={}),
         ):
             resp = client.get("/dashboard/api/recovery/files/1/label-image")
 
         assert resp.status_code == 404
-        assert "not configured" in resp.json()["detail"].lower()
+        assert "label image" in resp.json()["detail"].lower()
 
     def test_label_preview_endpoint_returns_200_on_db_error(self, client):
         """label-preview endpoint degrades to unavailable=False on DB error."""

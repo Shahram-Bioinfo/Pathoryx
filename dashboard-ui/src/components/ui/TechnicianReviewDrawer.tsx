@@ -112,10 +112,6 @@ function CompactEvidenceStrip({ fileId }: { fileId: number }) {
                           ? { label: 'Suggested', value: data.suggested_filename, accent: 'var(--accent)' } : null,
   ].filter(Boolean) as { label: string; value: string; accent?: string }[]
 
-  // Render nothing if there's no label data at all
-  if (!data && imageError) return null
-  if (!data?.available && facts.length === 0 && imageError) return null
-
   return (
     <div
       className="rounded flex gap-2.5 items-start"
@@ -125,7 +121,22 @@ function CompactEvidenceStrip({ fileId }: { fileId: number }) {
         padding: '7px 10px',
       }}
     >
-      {!imageError && (
+      {/* Label thumbnail or placeholder */}
+      {imageError ? (
+        <div
+          className="flex-shrink-0 flex items-center justify-center rounded text-[8px]"
+          style={{
+            width: 48, height: 46,
+            background: 'var(--surface-0)',
+            border: '1px dashed var(--border-faint)',
+            color: 'var(--text-faint)',
+            textAlign: 'center',
+            lineHeight: 1.2,
+          }}
+        >
+          no<br/>image
+        </div>
+      ) : (
         <img
           src={labelImageUrl}
           alt="Label"
@@ -220,11 +231,23 @@ function LabelMetadataPanel({ fileId }: { fileId: number }) {
       className="rounded-lg overflow-hidden"
       style={{ background: 'var(--surface-inset)', border: '1px solid var(--border-faint)' }}
     >
-      {!imageError && (
-        <div className="px-4 pt-3 pb-2" style={{ borderBottom: '1px solid var(--border-faint)' }}>
-          <p className="text-[9px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-faint)' }}>
-            Label Image
-          </p>
+      <div className="px-4 pt-3 pb-2" style={{ borderBottom: '1px solid var(--border-faint)' }}>
+        <p className="text-[9px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-faint)' }}>
+          Label Image
+        </p>
+        {imageError ? (
+          <div
+            className="rounded flex items-center justify-center text-[10px]"
+            style={{
+              height: 72,
+              background: 'var(--surface-0)',
+              border: '1px dashed var(--border-faint)',
+              color: 'var(--text-faint)',
+            }}
+          >
+            No label image available for this file
+          </div>
+        ) : (
           <img
             src={labelImageUrl}
             alt="Label preview"
@@ -232,8 +255,8 @@ function LabelMetadataPanel({ fileId }: { fileId: number }) {
             className="rounded max-h-24 w-auto"
             style={{ border: '1px solid var(--border-faint)', opacity: 0.9 }}
           />
-        </div>
-      )}
+        )}
+      </div>
       <div className="px-4 py-3 space-y-1">
         <p className="text-[9px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-faint)' }}>
           Extraction Data

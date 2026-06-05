@@ -1,0 +1,49 @@
+# =============================================================================
+# RecoverySentry — Configuration
+# Windows Test Environment
+# Monitors failed/suspicious/manual_review folders for technician corrections
+# and auto-recovers valid slides into the normal Pathoryx pipeline.
+# =============================================================================
+
+service:
+  name: recovery_sentry
+  poll_interval_seconds: 30
+  stable_after_seconds: 10
+
+# Folders to monitor for technician corrections.
+watch_folders:
+  - "/home/shahram/Pathoryx-Enterprise/data/failed"
+  - "/home/shahram/Pathoryx-Enterprise/data/suspicious"
+  - "/home/shahram/Pathoryx-Enterprise/data/manual_review"
+
+# Where recovered slides are moved to.
+# Structure: final_destination_root/<CaseID>/<FinalSlideID>.svs
+final_destination_root: "/home/shahram/Pathoryx-Enterprise/data/final"
+
+# BabelShark config to resolve final_output_dir if final_destination_root is not set.
+babelshark_config_path: ./configs/babelshark_config.yaml
+
+recovery:
+  # Attempt automatic recovery when a valid SlideID is detected
+  auto_recover_valid_slide_id: true
+
+  # If the filename is missing a UTC timestamp, extract it from WSI metadata
+  add_timestamp_if_missing: true
+
+  # Never overwrite an existing file at the destination
+  overwrite_existing: false
+
+  # When destination already exists: "suffix" adds _1, _2... | "manual_review" leaves for review
+  duplicate_strategy: suffix
+
+  # Checksum mode for snapshot fingerprinting: "partial" | "full" | "none"
+  # "partial" = first 4 MB SHA-256 (fast, catches most content changes)
+  checksum_mode: partial
+
+  # Allow file modification time as last-resort timestamp source.
+  # False = safer (filesystem timestamps can be inaccurate). Set true only if necessary.
+  allow_filesystem_timestamp_fallback: false
+
+next_stage:
+  target_service: qc_service
+  stage_name: qc
