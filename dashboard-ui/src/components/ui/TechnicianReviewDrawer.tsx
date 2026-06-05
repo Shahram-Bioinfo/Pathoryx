@@ -1,15 +1,18 @@
 /**
- * TechnicianReviewDrawer — Phase 8 Technician Review & Manual Rename
+ * TechnicianReviewDrawer — Technician Review & Manual Rename
  *
- * Opened from RecoveryCenter and FailureCenter for failed, suspicious, and
- * manual-review artifacts.  Shows everything the technician needs:
+ * Three tabs:
+ *   Inspect Label      — full label image + extraction metadata
+ *   Correct Filename   — Quick Rename OR Structured Builder (two modes)
+ *   Audit Trail        — chronological change + event history
  *
- *   - Parsed label metadata (scanner, DataMatrix, stain, ROI data, routing reason)
- *   - Label image thumbnail (if BabelShark saved one)
- *   - Live structured filename validation using the real Pathoryx parser rules
- *   - Rename + requeue workflow with confirmation
- *   - Review state transitions (Investigating / Dismiss)
- *   - Full chronological audit trail
+ * Correct Filename tab modes:
+ *   Quick Rename       — single text input, live validation, preserve existing workflow
+ *   Structured Builder — field-by-field form, auto-assembled filename, same validation/API
+ *
+ * Both rename modes use identical backend validation (POST /validate-filename)
+ * and the same safe rename API (POST /technician-rename).
+ * Every action creates audit events + TechnicianChange records + requeues QC on success.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle, ChevronRight, Clock, X, XCircle } from 'lucide-react'
@@ -25,10 +28,39 @@ import type {
   AuditChangeItem,
   AuditEventItem,
   FilenameValidationResponse,
+  LabelPreviewResponse,
   MonitoredFileItem,
   TechnicianRenameResponse,
 } from '../../types/api'
 import { fmtBytes, fmtDatetime, fmtEventType, fmtRelative } from '../../utils/formatters'
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const SUPPORTED_EXTENSIONS = ['.svs', '.ndpi', '.mrxs', '.tiff', '.tif', '.scn', '.czi', '.vsi', '.bif']
+
+// Common stains at the top; full list available via free text.
+// Mirrors resources/stain_list.json (backend authoritative source).
+const STAIN_LIST = [
+  'H&E', 'HE', 'PAS', 'MT', 'EVG', 'Gomorri', 'Grocott', 'Ziehl', 'Giemsa',
+  'AE1/3', 'AE1-3', 'CK7', 'CK5/6', 'CK5-6', 'CK14', 'CK18', 'CK19', 'CK20',
+  'CD3', 'CD4', 'CD5', 'CD8', 'CD10', 'CD15', 'CD19', 'CD20', 'CD21', 'CD22',
+  'CD23', 'CD30', 'CD31', 'CD34', 'CD38', 'CD43', 'CD45', 'CD56', 'CD57', 'CD61',
+  'CD68', 'CD79a', 'CD99', 'CD117', 'CD123', 'CD138', 'CD163', 'CD207',
+  'ER', 'PR', 'HER2', 'KI-67', 'P53', 'P63', 'p40', 'p16',
+  'BCL2', 'BCL6', 'SOX-11', 'SOX11', 'SOX-10', 'GATA3', 'PAX5', 'PAX8',
+  'S100', 'GFAP', 'NSE', 'SYN', 'CHRA', 'VIM', 'Desmin',
+  'TTF1', 'NKX3.1', 'PSMA', 'PSA', 'AFP', 'CEA', 'CA125', 'CA19-9',
+  'ALK1', 'BRAF', 'EGFR', 'PD-1', 'PD-L1',
+  'MLH1', 'MSH2', 'MSH6', 'PMS2',
+  'ERG', 'EMA', 'MUC2', 'MUC4', 'SALL4', 'STAT6',
+  'TdT', 'MPO', 'MUM1', 'LEF1',
+  'IgG4', 'Kappa', 'Lambda',
+  'MG', 'PAP', 'MGG', 'FE', 'Afog', 'DIA-PAS', 'NASDCL',
+  'CMV', 'SV40', 'HSV1', 'HSV2', 'HHV-8', 'HHV8', 'LMP',
+  'ASMA', 'Aktin',
+]
 
 // ---------------------------------------------------------------------------
 // Review state helpers
@@ -57,7 +89,90 @@ const REVIEW_STATE_COLOR: Record<string, string> = {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component: label metadata panel
+// Sub-component: compact evidence strip (shown in Correct Filename tab)
+// ---------------------------------------------------------------------------
+
+function CompactEvidenceStrip({ fileId }: { fileId: number }) {
+  const BASE = '/dashboard/api'
+  const labelImageUrl = `${BASE}/recovery/files/${fileId}/label-image`
+  const [imageError, setImageError] = useState(false)
+
+  const { data } = useQuery({
+    queryKey: ['labelPreview', fileId],
+    queryFn: () => fetchLabelPreview(fileId),
+    staleTime: 60_000,
+  })
+
+  const facts: { label: string; value: string; accent?: string }[] = [
+    data?.case_id         ? { label: 'Case',     value: data.case_id }                             : null,
+    (data?.stain_matched ?? data?.stain_type)
+                          ? { label: 'Stain',    value: data!.stain_matched ?? data!.stain_type! }  : null,
+    data?.scanner_id      ? { label: 'Scanner',  value: data.scanner_id }                          : null,
+    data?.suggested_filename
+                          ? { label: 'Suggested', value: data.suggested_filename, accent: 'var(--accent)' } : null,
+  ].filter(Boolean) as { label: string; value: string; accent?: string }[]
+
+  // Render nothing if there's no label data at all
+  if (!data && imageError) return null
+  if (!data?.available && facts.length === 0 && imageError) return null
+
+  return (
+    <div
+      className="rounded flex gap-2.5 items-start"
+      style={{
+        background: 'var(--surface-inset)',
+        border: '1px solid var(--border-faint)',
+        padding: '7px 10px',
+      }}
+    >
+      {!imageError && (
+        <img
+          src={labelImageUrl}
+          alt="Label"
+          onError={() => setImageError(true)}
+          style={{
+            height: 46,
+            width: 'auto',
+            borderRadius: 3,
+            flexShrink: 0,
+            border: '1px solid var(--border-faint)',
+            opacity: 0.88,
+          }}
+        />
+      )}
+      <div className="flex-1 min-w-0">
+        <p
+          className="text-[8px] uppercase tracking-widest mb-1.5"
+          style={{ color: 'var(--text-faint)' }}
+        >
+          Label Evidence
+        </p>
+        {facts.length > 0 ? (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+            {facts.map(({ label, value, accent }) => (
+              <span key={label} className="text-[9px]" style={{ color: 'var(--text-faint)' }}>
+                {label}:{' '}
+                <span
+                  className="font-mono"
+                  style={{ color: accent ?? 'var(--text-secondary)' }}
+                >
+                  {value}
+                </span>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[9px]" style={{ color: 'var(--text-faint)' }}>
+            No extraction data available for this file.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: label metadata panel (full — Inspect tab)
 // ---------------------------------------------------------------------------
 
 function LabelMetadataPanel({ fileId }: { fileId: number }) {
@@ -65,6 +180,7 @@ function LabelMetadataPanel({ fileId }: { fileId: number }) {
   const { data, isPending } = useQuery({
     queryKey: ['labelPreview', fileId],
     queryFn: () => fetchLabelPreview(fileId),
+    staleTime: 60_000,
   })
 
   const labelImageUrl = `${BASE}/recovery/files/${fileId}/label-image`
@@ -104,12 +220,8 @@ function LabelMetadataPanel({ fileId }: { fileId: number }) {
       className="rounded-lg overflow-hidden"
       style={{ background: 'var(--surface-inset)', border: '1px solid var(--border-faint)' }}
     >
-      {/* Label image thumbnail */}
       {!imageError && (
-        <div
-          className="px-4 pt-3 pb-2"
-          style={{ borderBottom: '1px solid var(--border-faint)' }}
-        >
+        <div className="px-4 pt-3 pb-2" style={{ borderBottom: '1px solid var(--border-faint)' }}>
           <p className="text-[9px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-faint)' }}>
             Label Image
           </p>
@@ -122,8 +234,6 @@ function LabelMetadataPanel({ fileId }: { fileId: number }) {
           />
         </div>
       )}
-
-      {/* Metadata rows */}
       <div className="px-4 py-3 space-y-1">
         <p className="text-[9px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-faint)' }}>
           Extraction Data
@@ -140,10 +250,7 @@ function LabelMetadataPanel({ fileId }: { fileId: number }) {
               <span className="w-28 flex-shrink-0 font-medium" style={{ color: 'var(--text-faint)' }}>
                 {label}
               </span>
-              <span
-                className="font-mono break-all"
-                style={{ color: accent ?? 'var(--text-secondary)' }}
-              >
+              <span className="font-mono break-all" style={{ color: accent ?? 'var(--text-secondary)' }}>
                 {value}
               </span>
             </div>
@@ -184,19 +291,16 @@ function ValidationPanel({
     cls === 'valid'           ? 'var(--chart-teal)'  :
     cls === 'partially_valid' ? 'var(--chart-amber)' :
                                 'var(--chart-rose)'
-  const icon =
+  const Icon =
     cls === 'valid'           ? CheckCircle :
     cls === 'partially_valid' ? Clock       :
                                 XCircle
-
-  const Icon = icon
 
   return (
     <div
       className="rounded-lg px-3 py-2 space-y-1.5"
       style={{ background: 'var(--surface-inset)', border: `1px solid ${color}22` }}
     >
-      {/* Classification badge */}
       <div className="flex items-center gap-1.5">
         <Icon className="h-3 w-3 flex-shrink-0" style={{ color }} aria-hidden />
         <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color }}>
@@ -204,7 +308,6 @@ function ValidationPanel({
         </span>
       </div>
 
-      {/* Component breakdown */}
       {serverResult.components && (
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
           {[
@@ -223,24 +326,318 @@ function ValidationPanel({
         </div>
       )}
 
-      {/* Errors */}
       {serverResult.errors.map(e => (
         <p key={e.code} className="text-[10px]" style={{ color: 'var(--chart-rose)' }}>{e.message}</p>
       ))}
-
-      {/* Warnings */}
       {serverResult.warnings.map(w => (
         <p key={w.code} className="text-[10px]" style={{ color: 'var(--chart-amber)' }}>{w.message}</p>
       ))}
-
-      {/* Suggestion */}
       {serverResult.suggested_correction && cls !== 'valid' && (
         <p className="text-[10px]" style={{ color: 'var(--text-faint)' }}>
-          Suggestion: <span className="font-mono" style={{ color: 'var(--accent)' }}>
+          Suggestion:{' '}
+          <span className="font-mono" style={{ color: 'var(--accent)' }}>
             {serverResult.suggested_correction}
           </span>
         </p>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: structured rename builder
+// ---------------------------------------------------------------------------
+
+interface BuilderState {
+  prefix: string
+  year: string
+  caseNum: string
+  pot: string
+  block: string
+  section: string
+  stain: string
+  extension: string
+  addTimestamp: boolean
+  tsDate: string
+  tsTime: string
+}
+
+function assembleName(s: BuilderState): string {
+  const paddedCase = s.caseNum.replace(/\D/g, '').padStart(6, '0')
+  const base = `${s.prefix}${s.year}${paddedCase}${s.pot}-${s.block}-${s.section}-${s.stain}`
+  if (!base.includes('-')) return `${base}${s.extension}`
+  if (s.addTimestamp && s.tsDate && s.tsTime) {
+    const parts = s.tsTime.split(':')
+    const hh = (parts[0] ?? '00').padStart(2, '0')
+    const mm = (parts[1] ?? '00').padStart(2, '0')
+    const ss = (parts[2] ?? '00').padStart(2, '0')
+    return `${base}_UTC${s.tsDate}T${hh}_${mm}_${ss}Z${s.extension}`
+  }
+  return `${base}${s.extension}`
+}
+
+function parseCaseId(caseId: string | null | undefined): { prefix: string; year: string; caseNum: string } | null {
+  if (!caseId) return null
+  const m = /^([A-Z])(\d{4})(\d{6})$/.exec(caseId)
+  if (!m) return null
+  return { prefix: m[1], year: m[2], caseNum: m[3] }
+}
+
+function todayDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function StructuredBuilderForm({
+  file,
+  onFilenameChange,
+}: {
+  file: MonitoredFileItem
+  onFilenameChange: (filename: string) => void
+}) {
+  const { data: lp } = useQuery<LabelPreviewResponse>({
+    queryKey: ['labelPreview', file.file_id],
+    queryFn: () => fetchLabelPreview(file.file_id),
+    staleTime: 60_000,
+  })
+
+  // Pre-populate from label preview or file metadata
+  const parsed = parseCaseId(lp?.case_id ?? file.case_id)
+
+  const [state, setState] = useState<BuilderState>(() => ({
+    prefix:       parsed?.prefix   ?? 'N',
+    year:         parsed?.year     ?? String(new Date().getFullYear()),
+    caseNum:      parsed?.caseNum  ?? '',
+    pot:          'SA',
+    block:        '1',
+    section:      '1',
+    stain:        lp?.stain_matched ?? lp?.stain_type ?? '',
+    extension:    file.extension   ?? (file.filename.includes('.') ? `.${file.filename.split('.').pop()}` : '.svs'),
+    addTimestamp: false,
+    tsDate:       todayDate(),
+    tsTime:       '00:00:00',
+  }))
+
+  // Re-populate stain when label preview loads
+  const hasPrePopulated = useRef(false)
+  useEffect(() => {
+    if (hasPrePopulated.current) return
+    if (!lp) return
+    const filledParsed = parseCaseId(lp.case_id ?? file.case_id)
+    setState(prev => ({
+      ...prev,
+      ...(filledParsed ? { prefix: filledParsed.prefix, year: filledParsed.year, caseNum: filledParsed.caseNum } : {}),
+      stain: lp.stain_matched ?? lp.stain_type ?? prev.stain,
+    }))
+    hasPrePopulated.current = true
+  }, [lp, file.case_id])
+
+  const set = (key: keyof BuilderState, value: string | boolean) =>
+    setState(prev => ({ ...prev, [key]: value }))
+
+  // Emit assembled filename whenever state changes
+  useEffect(() => {
+    const assembled = assembleName(state)
+    // Only emit if the assembled name looks plausible (has at least the separator)
+    if (assembled && assembled !== state.extension) {
+      onFilenameChange(assembled)
+    }
+  }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const paddedPreview = state.caseNum.replace(/\D/g, '').padStart(6, '0')
+  const caseIdPreview = `${state.prefix}${state.year}${paddedPreview}`
+  const assembled = assembleName(state)
+
+  const inputCls = "rounded px-2.5 py-1.5 text-[11px] font-mono w-full outline-none"
+  const inputStyle = {
+    background: 'var(--surface-inset)',
+    border: '1px solid var(--border-default)',
+    color: 'var(--text-primary)',
+  } as const
+  const labelCls = "text-[9px] uppercase tracking-wider block mb-1"
+  const labelStyle = { color: 'var(--text-faint)' } as const
+
+  return (
+    <div className="space-y-3">
+      {/* Case ID fields — 3-column row */}
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className={labelCls} style={labelStyle}>Prefix</label>
+          <input
+            className={inputCls}
+            style={inputStyle}
+            value={state.prefix}
+            maxLength={2}
+            placeholder="N"
+            onChange={e => set('prefix', e.target.value.toUpperCase())}
+          />
+        </div>
+        <div>
+          <label className={labelCls} style={labelStyle}>Year</label>
+          <input
+            className={inputCls}
+            style={inputStyle}
+            value={state.year}
+            maxLength={4}
+            placeholder="2024"
+            onChange={e => set('year', e.target.value.replace(/\D/g, ''))}
+          />
+        </div>
+        <div>
+          <label className={labelCls} style={labelStyle}>Case № (auto-pads)</label>
+          <input
+            className={inputCls}
+            style={inputStyle}
+            value={state.caseNum}
+            maxLength={6}
+            placeholder="002863"
+            onChange={e => set('caseNum', e.target.value.replace(/\D/g, ''))}
+          />
+        </div>
+      </div>
+
+      {/* Case ID preview chip */}
+      {caseIdPreview.length > 1 && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px]" style={{ color: 'var(--text-faint)' }}>Case ID →</span>
+          <span
+            className="font-mono text-[10px] px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--accent-faint)', color: 'var(--accent)' }}
+          >
+            {caseIdPreview}
+          </span>
+        </div>
+      )}
+
+      {/* Pot / Block / Section — 3-column */}
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className={labelCls} style={labelStyle}>Pot</label>
+          <input
+            className={inputCls}
+            style={inputStyle}
+            value={state.pot}
+            maxLength={4}
+            placeholder="SA"
+            onChange={e => set('pot', e.target.value.toUpperCase())}
+          />
+        </div>
+        <div>
+          <label className={labelCls} style={labelStyle}>Block</label>
+          <input
+            className={inputCls}
+            style={inputStyle}
+            value={state.block}
+            maxLength={3}
+            placeholder="1"
+            onChange={e => set('block', e.target.value.replace(/\D/g, ''))}
+          />
+        </div>
+        <div>
+          <label className={labelCls} style={labelStyle}>Section / Slide</label>
+          <input
+            className={inputCls}
+            style={inputStyle}
+            value={state.section}
+            maxLength={3}
+            placeholder="1"
+            onChange={e => set('section', e.target.value.replace(/\D/g, ''))}
+          />
+        </div>
+      </div>
+
+      {/* Stain combobox + Extension — 2-column */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className={labelCls} style={labelStyle}>Stain</label>
+          <input
+            className={inputCls}
+            style={inputStyle}
+            list="pathoryx-stain-list"
+            value={state.stain}
+            placeholder="H&E"
+            onChange={e => set('stain', e.target.value)}
+          />
+          <datalist id="pathoryx-stain-list">
+            {STAIN_LIST.map(s => <option key={s} value={s} />)}
+          </datalist>
+        </div>
+        <div>
+          <label className={labelCls} style={labelStyle}>Extension</label>
+          <select
+            className={inputCls}
+            style={{ ...inputStyle, cursor: 'pointer' }}
+            value={state.extension}
+            onChange={e => set('extension', e.target.value)}
+          >
+            {SUPPORTED_EXTENSIONS.map(ext => (
+              <option key={ext} value={ext}>{ext}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Timestamp toggle */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => set('addTimestamp', !state.addTimestamp)}
+          className="flex items-center gap-2 text-[10px]"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          <span
+            className="inline-flex items-center justify-center rounded-full flex-shrink-0"
+            style={{
+              width: 14, height: 14,
+              border: `2px solid ${state.addTimestamp ? 'var(--accent)' : 'var(--border-default)'}`,
+              background: state.addTimestamp ? 'var(--accent)' : 'transparent',
+            }}
+          />
+          Include UTC scan timestamp
+        </button>
+      </div>
+
+      {/* Timestamp fields — shown only when toggled */}
+      {state.addTimestamp && (
+        <div className="grid grid-cols-2 gap-2 pl-4">
+          <div>
+            <label className={labelCls} style={labelStyle}>Date (yyyy-MM-dd)</label>
+            <input
+              type="date"
+              className={inputCls}
+              style={inputStyle}
+              value={state.tsDate}
+              onChange={e => set('tsDate', e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={labelCls} style={labelStyle}>Time (HH:mm:ss)</label>
+            <input
+              type="time"
+              step="1"
+              className={inputCls}
+              style={inputStyle}
+              value={state.tsTime}
+              onChange={e => set('tsTime', e.target.value)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Assembled preview */}
+      <div
+        className="rounded px-3 py-2"
+        style={{ background: 'var(--surface-inset)', border: '1px solid var(--border-faint)' }}
+      >
+        <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-faint)' }}>
+          Assembled filename
+        </p>
+        <p
+          className="font-mono text-[11px] break-all"
+          style={{ color: assembled === state.extension ? 'var(--text-faint)' : 'var(--text-primary)' }}
+        >
+          {assembled || <span style={{ color: 'var(--text-faint)' }}>Fill in the fields above</span>}
+        </p>
+      </div>
     </div>
   )
 }
@@ -277,7 +674,6 @@ function AuditTimeline({ fileId }: { fileId: number }) {
   const changes: AuditChangeItem[] = data?.changes ?? []
   const events:  AuditEventItem[]  = data?.events  ?? []
 
-  // Merge and sort by timestamp
   type TimelineItem =
     | { kind: 'change'; ts: string | null; item: AuditChangeItem }
     | { kind: 'event';  ts: string | null; item: AuditEventItem }
@@ -300,10 +696,7 @@ function AuditTimeline({ fileId }: { fileId: number }) {
       {items.map(entry => {
         if (entry.kind === 'change') {
           const c = entry.item as AuditChangeItem
-          const src =
-            c.inferred_action === 'dashboard_correction'
-              ? 'dashboard'
-              : 'filesystem'
+          const src = c.inferred_action === 'dashboard_correction' ? 'dashboard' : 'filesystem'
           return (
             <div key={`c-${c.change_id}`} className="flex gap-2 text-[10px]">
               <span
@@ -319,7 +712,8 @@ function AuditTimeline({ fileId }: { fileId: number }) {
                 </span>
                 {c.new_filename && c.old_filename && c.new_filename !== c.old_filename && (
                   <span style={{ color: 'var(--text-faint)' }}>
-                    {' '}{c.old_filename} → <span className="font-mono" style={{ color: 'var(--accent)' }}>{c.new_filename}</span>
+                    {' '}{c.old_filename} →{' '}
+                    <span className="font-mono" style={{ color: 'var(--accent)' }}>{c.new_filename}</span>
                   </span>
                 )}
                 <span className="ml-1" style={{ color: 'var(--text-faint)' }}>
@@ -446,6 +840,9 @@ function ConfirmRenameDialog({
 // Main drawer
 // ---------------------------------------------------------------------------
 
+type DrawerTab   = 'inspect' | 'rename' | 'history'
+type RenameMode  = 'quick' | 'builder'
+
 interface Props {
   file: MonitoredFileItem
   onClose: () => void
@@ -454,18 +851,19 @@ interface Props {
 export function TechnicianReviewDrawer({ file, onClose }: Props) {
   const queryClient = useQueryClient()
 
-  // Rename form state
-  const [proposedFilename, setProposedFilename]   = useState(file.filename)
-  const [note, setNote]                            = useState('')
-  const [confirming, setConfirming]               = useState(false)
-  const [renameResult, setRenameResult]           = useState<TechnicianRenameResponse | null>(null)
+  // ── Core rename state (shared between both modes) ──────────────────────
+  const [proposedFilename, setProposedFilename] = useState(file.filename)
+  const [note, setNote]                         = useState('')
+  const [confirming, setConfirming]             = useState(false)
+  const [renameResult, setRenameResult]         = useState<TechnicianRenameResponse | null>(null)
 
-  // Active tab inside the drawer
-  const [tab, setTab] = useState<'inspect' | 'rename' | 'history'>('inspect')
+  // ── Tab and mode state ─────────────────────────────────────────────────
+  const [tab, setTab]             = useState<DrawerTab>('inspect')
+  const [renameMode, setRenameMode] = useState<RenameMode>('quick')
 
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Server-side validation (debounced)
+  // ── Server-side validation (debounced 250 ms) ──────────────────────────
   const [validationResult, setValidationResult] = useState<FilenameValidationResponse | null>(null)
   const [validating, setValidating]             = useState(false)
 
@@ -486,7 +884,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
     return () => clearTimeout(timer)
   }, [proposedFilename])
 
-  // Rename mutation
+  // ── Rename mutation ─────────────────────────────────────────────────────
   const renameMutation = useMutation({
     mutationFn: () =>
       postTechnicianRename(file.file_id, {
@@ -506,7 +904,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
     onError: () => setConfirming(false),
   })
 
-  // Review state mutation
+  // ── Review state mutation ───────────────────────────────────────────────
   const reviewMutation = useMutation({
     mutationFn: ({ status, note: n }: { status: string; note?: string }) => {
       if (!file.change_id) throw new Error('No TechnicianChange linked to this file')
@@ -518,6 +916,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
     },
   })
 
+  // ── Derived ─────────────────────────────────────────────────────────────
   const canRename =
     validationResult !== null &&
     validationResult.classification !== 'invalid' &&
@@ -530,13 +929,20 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
   }
 
   const workflowSource =
-    file.inferred_action === 'dashboard_correction'  ? 'Dashboard correction'         :
-    file.change_type === 'rename'                    ? 'Manual folder rename'          :
-    file.change_type === 'new_file'                  ? 'New file detected'             :
-    file.change_type                                 ? `Detected: ${file.change_type.replace(/_/g, ' ')}` :
-                                                       'Awaiting technician'
+    file.inferred_action === 'dashboard_correction' ? 'Dashboard correction'         :
+    file.change_type === 'rename'                   ? 'Manual folder rename'          :
+    file.change_type === 'new_file'                 ? 'New file detected'             :
+    file.change_type                                ? `Detected: ${file.change_type.replace(/_/g, ' ')}` :
+                                                      'Awaiting technician'
 
   const reviewStatus = file.review_status ?? null
+
+  // ── Label preview (fetched once; cached for both Inspect and Rename tabs) ─
+  const { data: labelPreview } = useQuery<LabelPreviewResponse>({
+    queryKey: ['labelPreview', file.file_id],
+    queryFn:  () => fetchLabelPreview(file.file_id),
+    staleTime: 60_000,
+  })
 
   return (
     <>
@@ -552,7 +958,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
       <div
         className="fixed top-0 right-0 h-full z-50 flex flex-col"
         style={{
-          width:      'min(520px, 96vw)',
+          width:      'min(540px, 96vw)',
           background: 'var(--surface-1)',
           borderLeft: '1px solid var(--border-default)',
           boxShadow:  '-8px 0 40px rgba(0,0,0,0.45)',
@@ -577,8 +983,6 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
             >
               {file.filename}
             </p>
-
-            {/* File metadata strip */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
               {file.case_id && (
                 <span className="text-[9px] font-mono" style={{ color: 'var(--accent)' }}>
@@ -638,17 +1042,14 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
               const blocked =
                 reviewMutation.isPending ||
                 isActive ||
-                // Only show if transition is sensible
-                (status === 'dismissed' && current === 'dismissed') ||
+                (status === 'dismissed'     && current === 'dismissed') ||
                 (status === 'investigating' && current === 'investigating')
               return (
                 <button
                   key={status}
                   type="button"
                   disabled={blocked}
-                  onClick={() =>
-                    reviewMutation.mutate({ status, note: undefined })
-                  }
+                  onClick={() => reviewMutation.mutate({ status, note: undefined })}
                   className="px-2.5 py-0.5 rounded text-[10px] font-medium"
                   style={{
                     color:      isActive ? 'var(--surface-1)' : REVIEW_STATE_COLOR[status],
@@ -677,22 +1078,20 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
         >
           {(
             [
-              { id: 'inspect' as const, label: 'Inspect Label' },
-              { id: 'rename'  as const, label: 'Correct Filename' },
-              { id: 'history' as const, label: 'Audit Trail' },
+              { id: 'inspect'  as const, label: 'Inspect Label' },
+              { id: 'rename'   as const, label: 'Correct Filename' },
+              { id: 'history'  as const, label: 'Audit Trail' },
             ]
           ).map(({ id, label }) => (
             <button
               key={id}
               type="button"
-              onClick={() => { setTab(id); if (id === 'rename') inputRef.current?.focus() }}
+              onClick={() => { setTab(id); if (id === 'rename') setTimeout(() => inputRef.current?.focus(), 50) }}
               className="px-4 py-2.5 text-[10px] font-medium tracking-wide"
               style={{
-                color:      tab === id ? 'var(--accent)'       : 'var(--text-muted)',
-                borderBottom: tab === id
-                  ? '2px solid var(--accent)'
-                  : '2px solid transparent',
-                background: 'transparent',
+                color:        tab === id ? 'var(--accent)'       : 'var(--text-muted)',
+                borderBottom: tab === id ? '2px solid var(--accent)' : '2px solid transparent',
+                background:   'transparent',
               }}
             >
               {label}
@@ -723,7 +1122,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
             </div>
           )}
 
-          {/* ── RENAME TAB ── */}
+          {/* ── CORRECT FILENAME TAB ── */}
           {tab === 'rename' && (
             <div className="space-y-4">
               {renameResult ? (
@@ -765,40 +1164,95 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
                 </div>
               ) : (
                 <>
-                  <div>
-                    <label
-                      htmlFor="proposed-filename"
-                      className="block text-[9px] uppercase tracking-wider mb-1.5"
-                      style={{ color: 'var(--text-faint)' }}
-                    >
-                      Proposed filename
-                    </label>
-                    <input
-                      id="proposed-filename"
-                      ref={inputRef}
-                      type="text"
-                      value={proposedFilename}
-                      onChange={e => setProposedFilename(e.target.value)}
-                      spellCheck={false}
-                      className="w-full rounded px-3 py-2 text-[11px] font-mono"
-                      style={{
-                        background: 'var(--surface-inset)',
-                        border:     `1px solid ${validationResult?.classification === 'invalid' ? 'rgba(225,29,72,0.40)' : 'var(--border-default)'}`,
-                        color:      'var(--text-primary)',
-                        outline:    'none',
-                      }}
-                      placeholder="N2024002863SA-1-1-H&E.svs"
-                    />
+                  {/* ── Compact evidence strip ── */}
+                  <CompactEvidenceStrip fileId={file.file_id} />
+
+                  {/* ── Mode toggle ── */}
+                  <div
+                    className="flex rounded-md overflow-hidden flex-shrink-0 self-start"
+                    style={{ border: '1px solid var(--border-default)' }}
+                  >
+                    {(
+                      [
+                        { id: 'quick'   as const, label: 'Quick Rename' },
+                        { id: 'builder' as const, label: 'Structured Builder' },
+                      ]
+                    ).map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setRenameMode(id)}
+                        className="px-3 py-1.5 text-[10px] font-medium"
+                        style={{
+                          background: renameMode === id ? 'var(--accent)' : 'transparent',
+                          color:      renameMode === id ? 'var(--surface-1)' : 'var(--text-muted)',
+                          borderRight: id === 'quick' ? '1px solid var(--border-default)' : 'none',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
 
-                  {/* Validation feedback */}
+                  {/* ── QUICK RENAME (preserved exactly) ── */}
+                  {renameMode === 'quick' && (
+                    <div className="space-y-3">
+                      <div>
+                        <label
+                          htmlFor="proposed-filename"
+                          className="block text-[9px] uppercase tracking-wider mb-1.5"
+                          style={{ color: 'var(--text-faint)' }}
+                        >
+                          Proposed filename
+                        </label>
+                        <input
+                          id="proposed-filename"
+                          ref={inputRef}
+                          type="text"
+                          value={proposedFilename}
+                          onChange={e => setProposedFilename(e.target.value)}
+                          spellCheck={false}
+                          className="w-full rounded px-3 py-2 text-[11px] font-mono"
+                          style={{
+                            background: 'var(--surface-inset)',
+                            border:     `1px solid ${validationResult?.classification === 'invalid' ? 'rgba(225,29,72,0.40)' : 'var(--border-default)'}`,
+                            color:      'var(--text-primary)',
+                            outline:    'none',
+                          }}
+                          placeholder="N2024002863SA-1-1-H&E.svs"
+                        />
+                        {/* Use suggested filename shortcut */}
+                        {labelPreview?.suggested_filename &&
+                          labelPreview.suggested_filename !== proposedFilename && (
+                          <button
+                            type="button"
+                            onClick={() => setProposedFilename(labelPreview.suggested_filename!)}
+                            className="mt-1 text-[9px]"
+                            style={{ color: 'var(--accent)' }}
+                          >
+                            ↑ Use suggested: {labelPreview.suggested_filename}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── STRUCTURED BUILDER (new) ── */}
+                  {renameMode === 'builder' && (
+                    <StructuredBuilderForm
+                      file={file}
+                      onFilenameChange={setProposedFilename}
+                    />
+                  )}
+
+                  {/* ── Shared: validation feedback ── */}
                   <ValidationPanel
                     filename={proposedFilename}
                     serverResult={validationResult}
                     isPending={validating}
                   />
 
-                  {/* Destination preview */}
+                  {/* ── Shared: destination preview ── */}
                   {canRename && validationResult?.components?.case_id && (
                     <div
                       className="rounded px-3 py-2 text-[10px] font-mono"
@@ -811,7 +1265,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
                     </div>
                   )}
 
-                  {/* Note field */}
+                  {/* ── Shared: technician note ── */}
                   <div>
                     <label
                       htmlFor="tech-note"
@@ -842,6 +1296,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
                     </p>
                   )}
 
+                  {/* ── Shared: submit ── */}
                   <button
                     type="button"
                     disabled={!canRename || renameMutation.isPending}
@@ -854,7 +1309,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
                       cursor:     canRename ? 'pointer' : 'not-allowed',
                     }}
                   >
-                    Correct Filename
+                    {renameMode === 'builder' ? 'Apply Structured Rename' : 'Correct Filename'}
                     <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                   </button>
                 </>
