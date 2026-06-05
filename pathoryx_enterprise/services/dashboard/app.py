@@ -261,7 +261,7 @@ def _label_allowed_roots(cfg: dict) -> list[Path]:
     Prevents path traversal: any resolved candidate outside these roots is rejected.
     """
     roots: list[Path] = []
-    # data/ relative to CWD is always permitted
+    # data/ relative to CWD is always permitted (covers watch folders + output dirs on Linux)
     cwd_data = Path("data").resolve()
     if cwd_data.exists():
         roots.append(cwd_data)
@@ -271,10 +271,43 @@ def _label_allowed_roots(cfg: dict) -> list[Path]:
             p = Path(cfg[key])
             if p.exists():
                 roots.append(p.resolve())
+    # Also add configured watch_folders from RecoverySentry so WSI files in those
+    # folders are readable on Windows where data/ may not exist
+    try:
+        from pathoryx_enterprise.services.recovery_sentry.config import RecoverySentrySettings
+        rs = RecoverySentrySettings()
+        for wf in rs.watch_folders:
+            if wf.exists():
+                roots.append(wf.resolve())
+        if rs.final_destination and rs.final_destination.exists():
+            roots.append(rs.final_destination.resolve())
+    except Exception:
+        pass
     # Absolute fallback so at least something is in the list
     if not roots:
         roots.append(Path("/").resolve())
     return roots
+
+
+def _label_cache_dir(cfg: dict) -> Path:
+    """
+    Return a writable directory for caching on-the-fly extracted label images.
+
+    Priority:
+      1. Configured label_crops_dir (if parent exists)
+      2. data/run_output/{today}/label_crops/
+      3. data/label_crops/
+    """
+    import datetime
+    if cfg.get("label_crops_dir"):
+        d = Path(cfg["label_crops_dir"])
+        if d.parent.exists():
+            return d
+    today = datetime.date.today().isoformat()
+    run_out_crops = Path("data/run_output") / today / "label_crops"
+    if run_out_crops.parent.parent.exists():
+        return run_out_crops
+    return Path("data/label_crops")
 
 
 def create_app() -> FastAPI:
@@ -906,23 +939,23 @@ def create_app() -> FastAPI:
     @app.get("/dashboard/api/recovery/files/{file_id}/label-image")
     def label_image(file_id: int, db: DbDep):
         """
-        Serve the extracted label-crop image for a watched folder file.
+        Serve the label-crop image for a watched folder file.
 
-        Search order (newest-date-first within each run_output tree):
-          1. run_output_dir/{date}/label_crops/{stem}.{ext}   (configured)
-          2. run_output_dir/{date}/failed_datamatrix/{stem}.{ext}
-          3. label_crops_dir/{stem}.{ext}                     (configured, flat)
-          4. label_root_dir/{stem}.{ext}                      (configured, legacy)
-          5. data/run_output/{date}/label_crops/{stem}.{ext}  (CWD fallback)
-          6. data/run_output/{date}/failed_datamatrix/{stem}.{ext}
-          7. data/label_crops/{stem}.{ext}
-          8. data/labels/{stem}.{ext}
+        Source resolution order:
+          1. Pre-generated label crop from run_output_dir/{date}/label_crops/ (newest first)
+          2. Pre-generated crop from failed_datamatrix/ subdirs
+          3. Configured label_crops_dir / label_root_dir (flat, legacy)
+          4. CWD fallback: data/run_output/{date}/label_crops/, data/label_crops/
+          5. On-the-fly extraction from the original WSI embedded label image
+             (OpenSlide associated_images — reads ~50 KB, NOT the full 10 GB scan)
+             → cached to data/label_crops/{stem}.png for future requests
+          6. 404 with structured reason
 
-        All candidates are checked against allowed roots to prevent path traversal.
-        Returns 404 with a structured reason when nothing is found.
+        All filesystem paths are validated with is_path_safe() before use.
         """
         from fastapi.responses import FileResponse
         from pathoryx_enterprise.utils.path_validation import is_path_safe, sanitize_filename
+        from .wsi_label_extractor import extract_wsi_label_to_cache
 
         snapshot = q.get_monitored_file(db, file_id)
         if snapshot is None:
@@ -937,6 +970,19 @@ def create_app() -> FastAPI:
         search_dirs = _build_label_search_dirs(cfg)
         allowed_roots = _label_allowed_roots(cfg)
 
+        def _serve(path: Path, source_header: str) -> FileResponse:
+            suffix = path.suffix.lower()
+            media = "image/jpeg" if suffix in (".jpg", ".jpeg") else f"image/{suffix.lstrip('.')}"
+            return FileResponse(
+                path=str(path),
+                media_type=media,
+                headers={
+                    "Cache-Control": "max-age=3600",
+                    "X-Label-Source": source_header,
+                },
+            )
+
+        # ── Steps 1-4: search pre-generated crop directories ─────────────────
         for directory in search_dirs:
             if not directory.exists():
                 continue
@@ -949,16 +995,18 @@ def create_app() -> FastAPI:
                         "label_image: candidate %s rejected by path validation", candidate
                     )
                     continue
-                media = (
-                    "image/jpeg" if suffix in (".jpg", ".jpeg")
-                    else f"image/{suffix.lstrip('.')}"
-                )
-                return FileResponse(
-                    path=str(candidate),
-                    media_type=media,
-                    headers={"Cache-Control": "max-age=3600"},
-                )
+                return _serve(candidate, "label_crop")
 
+        # ── Step 5: extract from original WSI if it still exists ─────────────
+        if snapshot.file_path:
+            wsi_path = Path(snapshot.file_path)
+            if wsi_path.exists() and is_path_safe(wsi_path, allowed_roots):
+                cache_dir = _label_cache_dir(cfg)
+                extracted = extract_wsi_label_to_cache(wsi_path, cache_dir, safe_stem)
+                if extracted is not None and extracted.exists():
+                    return _serve(extracted, "wsi_embedded")
+
+        # ── Step 6: nothing found ─────────────────────────────────────────────
         raise HTTPException(
             status_code=404,
             detail=f"No label image found for '{snapshot.filename}'",
