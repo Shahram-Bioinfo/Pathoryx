@@ -9,7 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle, ChevronRight, Clock, ImageOff,
-  Maximize2, Minimize2, RotateCcw, X, XCircle, ZoomIn, ZoomOut,
+  Maximize2, Minimize2, RotateCcw, RotateCw, X, XCircle, ZoomIn, ZoomOut,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -128,16 +128,19 @@ const MAX_ZOOM = 10
 
 interface ZoomPanState {
   zoom: number; pan: { x: number; y: number }; isDragging: boolean
+  rotation: number
   handleWheel:     (e: React.WheelEvent) => void
   handleMouseDown: (e: React.MouseEvent) => void
   handleMouseMove: (e: React.MouseEvent) => void
   handleMouseUp:   () => void
   zoomIn: () => void; zoomOut: () => void; reset: () => void
+  rotateLeft: () => void; rotateRight: () => void
 }
 
 function useZoomPan(): ZoomPanState {
-  const [zoom, setZoom] = useState(1)
-  const [pan,  setPan]  = useState({ x: 0, y: 0 })
+  const [zoom,     setZoom]     = useState(1)
+  const [pan,      setPan]      = useState({ x: 0, y: 0 })
+  const [rotation, setRotation] = useState(0)
   const drag = useRef<{ mx: number; my: number; px: number; py: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -164,11 +167,13 @@ function useZoomPan(): ZoomPanState {
 
   const handleMouseUp = useCallback(() => { drag.current = null; setIsDragging(false) }, [])
 
-  const zoomIn  = useCallback(() => setZoom(z => Math.min(MAX_ZOOM, z * 1.35)), [])
-  const zoomOut = useCallback(() => setZoom(z => Math.max(MIN_ZOOM, z / 1.35)), [])
-  const reset   = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
+  const zoomIn     = useCallback(() => setZoom(z => Math.min(MAX_ZOOM, z * 1.35)), [])
+  const zoomOut    = useCallback(() => setZoom(z => Math.max(MIN_ZOOM, z / 1.35)), [])
+  const reset      = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }); setRotation(0) }, [])
+  const rotateLeft  = useCallback(() => { setRotation(r => (r - 90 + 360) % 360); setZoom(1); setPan({ x: 0, y: 0 }) }, [])
+  const rotateRight = useCallback(() => { setRotation(r => (r + 90) % 360); setZoom(1); setPan({ x: 0, y: 0 }) }, [])
 
-  return { zoom, pan, isDragging, handleWheel, handleMouseDown, handleMouseMove, handleMouseUp, zoomIn, zoomOut, reset }
+  return { zoom, pan, isDragging, rotation, handleWheel, handleMouseDown, handleMouseMove, handleMouseUp, zoomIn, zoomOut, reset, rotateLeft, rotateRight }
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +256,7 @@ function LabelImageViewer({
       if      (e.key === '+'  || e.key === '=') { e.preventDefault(); zp.zoomIn() }
       else if (e.key === '-')                   { e.preventDefault(); zp.zoomOut() }
       else if (e.key === '0')                   { e.preventDefault(); zp.reset() }
+      else if (e.key.toLowerCase() === 'r')     { e.preventDefault(); zp.rotateRight() }
       else if (e.key.toLowerCase() === 'f')     { e.preventDefault(); toggleFs() }
     }
     window.addEventListener('keydown', fn)
@@ -366,9 +372,9 @@ function LabelImageViewer({
               maxWidth: '100%',
               maxHeight: '100%',
               objectFit: 'contain',
-              transform: `scale(${zp.zoom}) translate(${zp.pan.x / zp.zoom}px, ${zp.pan.y / zp.zoom}px)`,
+              transform: `rotate(${zp.rotation}deg) scale(${zp.zoom}) translate(${zp.pan.x / zp.zoom}px, ${zp.pan.y / zp.zoom}px)`,
               transformOrigin: 'center center',
-              transition: zp.isDragging ? 'none' : 'transform 0.07s ease-out',
+              transition: zp.isDragging ? 'none' : 'transform 0.18s ease-out',
               opacity: status === 'loaded' ? 1 : 0,
               imageRendering: zp.zoom > 4 ? 'pixelated' : 'auto',
               willChange: 'transform',
@@ -390,10 +396,13 @@ function LabelImageViewer({
             }}
             onMouseDown={e => e.stopPropagation()}
           >
+            {ctrlBtn('Rotate left', <RotateCcw style={{ width: 11, height: 11 }} />, zp.rotateLeft)}
+            {ctrlBtn('Rotate right  (R)', <RotateCw style={{ width: 11, height: 11 }} />, zp.rotateRight)}
+            <div style={{ width: 1, height: 12, background: 'rgba(255,255,255,0.18)', margin: '0 1px', flexShrink: 0 }} />
             {ctrlBtn('Zoom out  (−)', <ZoomOut style={{ width: 11, height: 11 }} />, zp.zoomOut)}
             <span
               onClick={e => { e.stopPropagation(); zp.reset() }}
-              title="Reset zoom  (0)"
+              title="Reset all  (0)"
               style={{
                 fontSize: 8,
                 fontVariantNumeric: 'tabular-nums',
@@ -407,7 +416,6 @@ function LabelImageViewer({
               {Math.round(zp.zoom * 100)}%
             </span>
             {ctrlBtn('Zoom in  (+)', <ZoomIn style={{ width: 11, height: 11 }} />, zp.zoomIn)}
-            {ctrlBtn('Reset zoom  (0)', <RotateCcw style={{ width: 10, height: 10 }} />, zp.reset)}
             {onExpand && ctrlBtn('Open full view', <Maximize2 style={{ width: 10, height: 10 }} />, onExpand)}
             {autoKeyboard && ctrlBtn(
               fsActive ? 'Exit fullscreen  (F)' : 'Fullscreen  (F)',
@@ -494,7 +502,7 @@ function LabelLightbox({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[8px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-              +/−  zoom  ·  0  reset  ·  F  fullscreen  ·  Esc  close
+              +/−  zoom  ·  R  rotate  ·  0  reset  ·  F  fullscreen  ·  Esc  close
             </span>
             <button
               type="button"
@@ -513,7 +521,7 @@ function LabelLightbox({
           source={source}
           dims={dims}
           setDims={setDims}
-          containerH={560}
+          containerH={620}
           labelPreview={labelPreview}
           showChips
           autoKeyboard
@@ -678,7 +686,7 @@ function LabelMetadataPanel({ fileId }: { fileId: number }) {
             source={img.source}
             dims={img.dims}
             setDims={img.setDims}
-            containerH={220}
+            containerH={280}
             labelPreview={labelPreview}
             onExpand={() => setLightboxOpen(true)}
             showChips
@@ -734,10 +742,12 @@ function ValidationPanel({
   filename,
   serverResult,
   isPending: validating,
+  onApplyNormalized,
 }: {
   filename: string
   serverResult: FilenameValidationResponse | null
   isPending: boolean
+  onApplyNormalized?: (name: string) => void
 }) {
   if (!filename.trim()) return null
 
@@ -805,8 +815,46 @@ function ValidationPanel({
           </span>
         </p>
       )}
+
+      {serverResult.normalized_filename &&
+        serverResult.normalized_filename !== filename &&
+        onApplyNormalized && (
+        <div
+          className="flex items-center justify-between gap-2 rounded px-2 py-1.5"
+          style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.20)' }}
+        >
+          <span className="text-[9px] font-mono truncate" style={{ color: 'var(--accent)' }}>
+            {serverResult.normalized_filename}
+          </span>
+          <button
+            type="button"
+            onClick={() => onApplyNormalized(serverResult.normalized_filename!)}
+            className="flex-shrink-0 text-[9px] font-semibold px-2 py-0.5 rounded"
+            style={{ background: 'var(--accent)', color: 'var(--surface-1)', whiteSpace: 'nowrap' }}
+          >
+            Apply canonical
+          </button>
+        </div>
+      )}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Client-side stain synonym normalization
+// ---------------------------------------------------------------------------
+
+const _STAIN_SYNONYMS: Record<string, string> = {
+  he: 'H&E', 'h-e': 'H&E', 'h+e': 'H&E',
+  hematoxylin: 'H&E', haematoxylin: 'H&E',
+  'pas-d': 'PAS', pasd: 'PAS',
+  masson: 'MT', massons: 'MT', 'masson-trichrome': 'MT',
+  zn: 'Ziehl', 'ziehl-neelsen': 'Ziehl', ziehlneelsen: 'Ziehl',
+  ki67: 'KI-67', grocotts: 'Grocott', 'grocott-methenamine': 'Grocott',
+}
+
+function canonicalStain(raw: string): string {
+  return _STAIN_SYNONYMS[raw.toLowerCase()] ?? raw
 }
 
 // ---------------------------------------------------------------------------
@@ -922,17 +970,40 @@ function StructuredBuilderForm({
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div><label className={lbl} style={lblS}>Stain</label>
-          <input className={inp} style={inpS} list="pathoryx-stain-list" value={state.stain}
-            placeholder="H&E" onChange={e => set('stain', e.target.value)} />
+        <div>
+          <label className={lbl} style={lblS}>Stain</label>
+          <input
+            className={inp} style={inpS}
+            list="pathoryx-stain-list" value={state.stain}
+            placeholder="H&E"
+            onChange={e => set('stain', e.target.value)}
+            onBlur={e => {
+              const canon = canonicalStain(e.target.value)
+              if (canon !== e.target.value) set('stain', canon)
+            }}
+          />
           <datalist id="pathoryx-stain-list">
             {STAIN_LIST.map(s => <option key={s} value={s} />)}
-          </datalist></div>
-        <div><label className={lbl} style={lblS}>Extension</label>
-          <select className={inp} style={{ ...inpS, cursor: 'pointer' }}
-            value={state.extension} onChange={e => set('extension', e.target.value)}>
+          </datalist>
+        </div>
+        <div>
+          <label className={lbl} style={lblS}>
+            Extension
+            {state.extension === (file.extension ?? '.svs') && (
+              <span className="ml-1 text-[8px]" style={{ color: 'var(--text-faint)' }}>
+                (original WSI type)
+              </span>
+            )}
+          </label>
+          <select
+            className={inp}
+            style={{ ...inpS, cursor: 'pointer' }}
+            value={state.extension}
+            onChange={e => set('extension', e.target.value)}
+          >
             {SUPPORTED_EXTENSIONS.map(x => <option key={x} value={x}>{x}</option>)}
-          </select></div>
+          </select>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
@@ -1134,7 +1205,7 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
     if (!proposed) { setValidationResult(null); return }
     const timer = setTimeout(async () => {
       setValidating(true)
-      try { setValidationResult(await postValidateFilename(proposed)) }
+      try { setValidationResult(await postValidateFilename(proposed, file.extension ?? undefined)) }
       catch { setValidationResult(null) }
       finally { setValidating(false) }
     }, 250)
@@ -1330,11 +1401,19 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
                       ? 'rgba(52,211,153,0.20)' : 'rgba(217,119,6,0.20)'}`,
                   }}>
                   <p className="text-xs font-semibold"
-                    style={{ color: renameResult.outcome === 'auto_recovered' ? 'var(--chart-teal)' : 'var(--chart-amber)' }}>
+                    style={{
+                      color: renameResult.outcome === 'auto_recovered'
+                        ? 'var(--chart-teal)'
+                        : renameResult.outcome === 'validation_failed'
+                        ? 'var(--chart-rose)'
+                        : 'var(--chart-amber)'
+                    }}>
                     {renameResult.outcome === 'auto_recovered'
                       ? 'File recovered — QC requeued'
                       : renameResult.outcome === 'manual_review_required'
                       ? 'Manual review still required'
+                      : renameResult.outcome === 'validation_failed'
+                      ? 'Rename rejected — filename invalid'
                       : renameResult.outcome}
                   </p>
                   {renameResult.reason && (
@@ -1411,7 +1490,12 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
                     <StructuredBuilderForm file={file} onFilenameChange={setProposedFilename} />
                   )}
 
-                  <ValidationPanel filename={proposedFilename} serverResult={validationResult} isPending={validating} />
+                  <ValidationPanel
+                    filename={proposedFilename}
+                    serverResult={validationResult}
+                    isPending={validating}
+                    onApplyNormalized={name => setProposedFilename(name)}
+                  />
 
                   {canRename && validationResult?.components?.case_id && (
                     <div className="rounded px-3 py-2 text-[10px] font-mono"

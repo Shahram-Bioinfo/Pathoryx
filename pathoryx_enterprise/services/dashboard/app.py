@@ -74,6 +74,17 @@ from .schemas import (
     TriggerItem,
     TriggerStatusCounts,
     UploadResultSummary,
+    ScannerConfig,
+    ScannerFleetResponse,
+    ScannerSummaryItem,
+    ScannerSummaryResponse,
+    UploadFilterOptions,
+    UploadIngestRequest,
+    UploadIngestResponse,
+    UploadMetrics,
+    UploadQueueItem,
+    UploadQueueResponse,
+    UploadQueueUpdateRequest,
     ValidationComponent,
     ValidationIssue,
     WatchFolderSummary,
@@ -177,6 +188,42 @@ DbDep = Annotated[Session, Depends(get_db)]
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
+
+
+import functools
+from .scanner_fleet import ScannerFleet
+
+
+@functools.lru_cache(maxsize=1)
+def _load_scanner_fleet() -> ScannerFleet:
+    """
+    Load the scanner fleet config once and cache it.
+    Returned object is immutable so cache sharing is safe.
+    Gracefully returns an empty fleet if no config is found.
+    """
+    return ScannerFleet.load_default()
+
+
+@functools.lru_cache(maxsize=1)
+def _load_recovery_config() -> dict:
+    """
+    Load recovery_sentry.yaml for validation hints (timestamp policy).
+    Cached after first load; returns {} on any failure.
+    Safe to call on every keystroke — never hits the filesystem more than once.
+    """
+    import os
+    import yaml
+
+    path_str = (
+        os.environ.get("RECOVERY_SENTRY_CONFIG")
+        or "configs/recovery_sentry.yaml"
+    )
+    try:
+        with open(path_str) as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception as exc:
+        logger.debug("_load_recovery_config: %s", exc)
+        return {}
 
 
 def _load_babelshark_config() -> dict:
@@ -875,12 +922,21 @@ def create_app() -> FastAPI:
     )
     def validate_filename(body: FilenameValidationRequest) -> FilenameValidationResponse:
         """
-        Validate a proposed filename against the Pathoryx slide ID parser rules.
+        Validate a proposed filename against the Pathoryx slide ID rules.
 
         Safe to call on every keystroke — no filesystem or DB side-effects.
-        Returns structured components so the UI can show field-level feedback.
+        Returns structured components and any stain-canonical normalized form.
         """
-        result = validate_filename_structured(body.filename)
+        rec_cfg = _load_recovery_config()
+        config_requires_timestamp = not rec_cfg.get("recovery", {}).get(
+            "add_timestamp_if_missing", True
+        )
+
+        result = validate_filename_structured(
+            body.filename,
+            original_extension=body.original_extension,
+            config_requires_timestamp=config_requires_timestamp,
+        )
         components = None
         if result["components"]:
             c = result["components"]
@@ -900,6 +956,7 @@ def create_app() -> FastAPI:
             errors=[ValidationIssue(**e) for e in result["errors"]],
             warnings=[ValidationIssue(**w) for w in result["warnings"]],
             suggested_correction=result.get("suggested_correction"),
+            normalized_filename=result.get("normalized_filename"),
         )
 
     # ------------------------------------------------------------------
@@ -1123,6 +1180,182 @@ def create_app() -> FastAPI:
     def operations_environment() -> EnvironmentConfig:
         cfg = q.get_environment_config()
         return EnvironmentConfig(**cfg)
+
+    # ------------------------------------------------------------------
+    # Phase 3.6 — Scanner Fleet endpoints
+    # ------------------------------------------------------------------
+
+    from . import upload_queries as uq
+
+    @app.get(
+        "/dashboard/api/scanners",
+        response_model=ScannerFleetResponse,
+        summary="Scanner fleet configuration",
+    )
+    def scanner_fleet_list(
+        include_disabled: Annotated[bool, Query(description="Include disabled scanners")] = False,
+    ) -> ScannerFleetResponse:
+        """
+        Return the configured scanner fleet.
+        By default only enabled scanners are returned; pass include_disabled=true
+        to retrieve the complete fleet including disabled entries.
+        """
+        fleet = _load_scanner_fleet()
+        entries = fleet.all() if include_disabled else fleet.enabled()
+        return ScannerFleetResponse(
+            scanners=[
+                ScannerConfig(
+                    scanner_id=e.scanner_id,
+                    display_name=e.display_name,
+                    location=e.location,
+                    vendor=e.vendor,
+                    enabled=e.enabled,
+                )
+                for e in entries
+            ],
+            total=fleet.total_count,
+            enabled_count=fleet.enabled_count,
+        )
+
+    @app.get(
+        "/dashboard/api/scanners/summary",
+        response_model=ScannerSummaryResponse,
+        summary="Per-scanner upload queue metrics",
+    )
+    def scanner_summary(db: DbDep) -> ScannerSummaryResponse:
+        """
+        Return upload queue counts grouped by scanner, enriched with display names.
+        Includes all scanners that have queue data PLUS enabled fleet scanners with
+        zero counts (so the summary always shows the full configured fleet).
+        """
+        fleet = _load_scanner_fleet()
+        try:
+            items = uq.get_scanner_summary(db, fleet)
+        except Exception as exc:
+            logger.warning("scanner_summary: query failed: %s", exc)
+            items = []
+        return ScannerSummaryResponse(
+            scanners=[ScannerSummaryItem(**item) for item in items],
+            as_of=datetime.now(tz=timezone.utc),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 3.5 — Upload Operations endpoints
+    # ------------------------------------------------------------------
+
+    @app.get(
+        "/dashboard/api/uploads/queue",
+        response_model=UploadQueueResponse,
+        summary="Paginated upload queue with optional filters",
+    )
+    def upload_queue(
+        db: DbDep,
+        status: Annotated[Optional[str], Query(description="queued|estimating|uploading|uploaded|delayed|failed")] = None,
+        scanner_id: Annotated[Optional[str], Query()] = None,
+        uploader_host: Annotated[Optional[str], Query()] = None,
+        search: Annotated[Optional[str], Query(description="Filename/slide_id substring")] = None,
+        from_date: Annotated[Optional[datetime], Query()] = None,
+        to_date: Annotated[Optional[datetime], Query()] = None,
+        page: Annotated[int, Query(ge=1)] = 1,
+        page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> UploadQueueResponse:
+        try:
+            total, items = uq.list_upload_queue(
+                db,
+                status=status,
+                scanner_id=scanner_id,
+                uploader_host=uploader_host,
+                search=search,
+                from_date=from_date,
+                to_date=to_date,
+                page=page,
+                page_size=page_size,
+            )
+        except Exception as exc:
+            logger.warning("upload_queue: query failed: %s", exc)
+            return UploadQueueResponse(total=0, page=page, page_size=page_size, items=[])
+        return UploadQueueResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            items=[UploadQueueItem(**item) for item in items],
+        )
+
+    @app.get(
+        "/dashboard/api/uploads/metrics",
+        response_model=UploadMetrics,
+        summary="Upload queue operational metrics",
+    )
+    def upload_metrics(db: DbDep) -> UploadMetrics:
+        try:
+            metrics = uq.get_upload_metrics(db)
+        except Exception as exc:
+            logger.warning("upload_metrics: query failed: %s", exc)
+            metrics = {
+                "queued_count": 0, "active_count": 0, "completed_today": 0,
+                "failed_count": 0, "delayed_count": 0,
+                "avg_duration_seconds": None, "avg_throughput_mbps": None,
+            }
+        return UploadMetrics(**metrics)
+
+    @app.get(
+        "/dashboard/api/uploads/filters",
+        response_model=UploadFilterOptions,
+        summary="Available filter values for scanner and host dropdowns",
+    )
+    def upload_filters(db: DbDep) -> UploadFilterOptions:
+        try:
+            scanners = uq.list_upload_scanners(db)
+            hosts = uq.list_upload_hosts(db)
+        except Exception as exc:
+            logger.warning("upload_filters: query failed: %s", exc)
+            scanners, hosts = [], []
+        return UploadFilterOptions(scanners=scanners, hosts=hosts)
+
+    @app.post(
+        "/dashboard/api/uploads/ingest",
+        response_model=UploadIngestResponse,
+        summary="Bulk upsert upload queue records from the uploader service",
+    )
+    def upload_ingest(
+        db: DbDep,
+        body: UploadIngestRequest,
+    ) -> UploadIngestResponse:
+        """
+        Idempotent bulk ingest from the uploader service.
+
+        Each record is upserted by (filename, queued_at).
+        Only updates if the incoming last_updated_at is newer than stored.
+        Safe to call repeatedly; no duplicate rows are created.
+        """
+        if not body.records:
+            return UploadIngestResponse(upserted_count=0, skipped_count=0)
+        try:
+            records = [r.model_dump(exclude_none=False) for r in body.records]
+            upserted, skipped = uq.upsert_upload_records(db, records)
+        except Exception as exc:
+            logger.error("upload_ingest: failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Ingest operation failed") from exc
+        return UploadIngestResponse(upserted_count=upserted, skipped_count=skipped)
+
+    @app.put(
+        "/dashboard/api/uploads/queue/{record_id}",
+        response_model=UploadQueueItem,
+        summary="Update a single upload queue record",
+    )
+    def upload_update(
+        db: DbDep,
+        record_id: int,
+        body: UploadQueueUpdateRequest,
+    ) -> UploadQueueItem:
+        try:
+            result = uq.update_upload_record(db, record_id, body.model_dump(exclude_none=True))
+        except Exception as exc:
+            logger.error("upload_update: %s", exc)
+            raise HTTPException(status_code=500, detail="Update failed") from exc
+        if result is None:
+            raise HTTPException(status_code=404, detail="Upload record not found")
+        return UploadQueueItem(**result)
 
     @app.get(
         "/dashboard/api/operations/db-health",

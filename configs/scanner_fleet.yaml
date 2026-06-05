@@ -1,0 +1,38 @@
+# =============================================================================
+# Pathoryx — Scanner Fleet Configuration
+# =============================================================================
+#
+# Maps operational scanner_id values (as recorded in the pipeline database)
+# to human-readable display names for the dashboard.
+#
+# scanner_id:   The ID string stored in FileRecord, upload_results, and
+#               upload_tracking.estimated_upload_queue. Must match exactly.
+# display_name: Short operational name shown in the dashboard UI.
+# location:     Physical location label (shown in tooltips and details).
+# vendor:       Scanner manufacturer (informational).
+# enabled:      true = scanner visible in filter dropdowns.
+#               false = scanner hidden from filters but still visible if it
+#                       has active pipeline data (data always wins over config).
+#
+# Reload requires a dashboard service restart. Unknown scanner IDs
+# (not listed here) fall back to displaying the raw scanner_id.
+# =============================================================================
+
+scanners:
+  - scanner_id:    scanner-01
+    display_name:  homeone
+    location:      lab-main
+    vendor:        unknown
+    enabled:       true
+
+  - scanner_id:    scanner-02
+    display_name:  resolute
+    location:      lab-main
+    vendor:        unknown
+    enabled:       true
+
+  - scanner_id:    scanner-03
+    display_name:  stardestroyer
+    location:      lab-main
+    vendor:        unknown
+    enabled:       true

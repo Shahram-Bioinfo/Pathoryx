@@ -346,6 +346,7 @@ export interface FilenameValidationResponse {
   errors: ValidationIssue[]
   warnings: ValidationIssue[]
   suggested_correction: string | null
+  normalized_filename: string | null  // stain-canonicalized form when different from input
 }
 
 // ---- Recovery — review state update ----
@@ -589,3 +590,113 @@ export interface ServicesHealthResponse {
   stale_threshold_seconds: number
   as_of: string
 }
+
+// ---- Phase 3.5 — Upload Operations ----
+
+export type UploadStatus = 'queued' | 'estimating' | 'uploading' | 'uploaded' | 'delayed' | 'failed'
+
+export interface UploadQueueItem {
+  id: number
+  slide_id: string | null
+  filename: string
+  scanner_id: string | null
+  uploader_host: string | null
+  queued_at: string
+  estimated_upload_at: string | null
+  upload_started_at: string | null
+  upload_completed_at: string | null
+  upload_status: UploadStatus
+  retry_count: number
+  file_size_bytes: number | null
+  priority: number
+  upload_speed_mbps: number | null
+  failure_reason: string | null
+  last_updated_at: string
+  is_delayed: boolean
+}
+
+export interface UploadQueueResponse {
+  total: number
+  page: number
+  page_size: number
+  items: UploadQueueItem[]
+}
+
+export interface UploadMetrics {
+  queued_count: number
+  active_count: number
+  completed_today: number
+  failed_count: number
+  delayed_count: number
+  avg_duration_seconds: number | null
+  avg_throughput_mbps: number | null
+}
+
+export interface UploadFilterOptions {
+  scanners: string[]
+  hosts: string[]
+}
+
+export interface UploadIngestRecord {
+  slide_id?: string
+  filename: string
+  scanner_id?: string
+  uploader_host?: string
+  queued_at: string
+  estimated_upload_at?: string
+  upload_started_at?: string
+  upload_completed_at?: string
+  upload_status?: string
+  retry_count?: number
+  file_size_bytes?: number
+  priority?: number
+  upload_speed_mbps?: number
+  failure_reason?: string
+  last_updated_at?: string
+}
+
+export interface UploadIngestRequest {
+  records: UploadIngestRecord[]
+}
+
+export interface UploadIngestResponse {
+  upserted_count: number
+  skipped_count: number
+}
+
+// ---- Phase 3.6 — Scanner Fleet ----
+
+export interface ScannerConfig {
+  scanner_id: string
+  display_name: string
+  location: string
+  vendor: string
+  enabled: boolean
+}
+
+export interface ScannerFleetResponse {
+  scanners: ScannerConfig[]
+  total: number
+  enabled_count: number
+}
+
+export interface ScannerSummaryItem {
+  scanner_id: string
+  display_name: string
+  location: string
+  vendor: string
+  enabled: boolean
+  queued: number
+  active: number
+  failed: number
+  delayed: number
+  total: number
+}
+
+export interface ScannerSummaryResponse {
+  scanners: ScannerSummaryItem[]
+  as_of: string
+}
+
+/** Lookup map: scanner_id → display_name */
+export type ScannerMap = Record<string, string>

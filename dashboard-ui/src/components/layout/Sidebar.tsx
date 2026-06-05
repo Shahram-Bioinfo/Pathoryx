@@ -1,5 +1,5 @@
 import {
-  Activity, AlertTriangle, FlaskConical,
+  Activity, AlertTriangle, CloudUpload, FlaskConical,
   Layers, LayoutDashboard, RefreshCcw, ShieldCheck,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
@@ -12,6 +12,7 @@ const NAV = [
   { to: '/failures',   label: 'Failure Center',   icon: AlertTriangle   },
   { to: '/recovery',   label: 'Recovery Center',  icon: RefreshCcw      },
   { to: '/operations', label: 'Operations',       icon: ShieldCheck     },
+  { to: '/uploads',    label: 'Upload Operations', icon: CloudUpload    },
 ]
 
 export function Sidebar() {

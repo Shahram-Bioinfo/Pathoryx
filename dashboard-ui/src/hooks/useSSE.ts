@@ -46,6 +46,8 @@ const EVENT_INVALIDATIONS: Readonly<Record<string, readonly string[][]>> = {
   recovery_event_created:  [['recovery'], ['failures'], ['slide'], ['artifactInvestigation'], ['auditTrail']],
   // service_health_updated refreshes service health AND operations center (Phase 10)
   service_health_updated:  [['services-health'], ['operations']],
+  // upload_queue_updated refreshes all upload operations views (Phase 3.5)
+  upload_queue_updated:    [['uploads']],
 }
 
 /** Debounce window.  Multiple events for the same key within this window

@@ -45,8 +45,12 @@ export const postTechnicianRename = (
 
 export const postValidateFilename = (
   filename: string,
+  originalExtension?: string,
 ): Promise<FilenameValidationResponse> =>
-  apiPost<FilenameValidationResponse>('/recovery/validate-filename', { filename })
+  apiPost<FilenameValidationResponse>('/recovery/validate-filename', {
+    filename,
+    ...(originalExtension ? { original_extension: originalExtension } : {}),
+  })
 
 export const patchReviewState = (
   changeId: number,

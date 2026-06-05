@@ -415,6 +415,7 @@ class ValidationIssue(BaseModel):
 
 class FilenameValidationRequest(BaseModel):
     filename: str
+    original_extension: Optional[str] = None  # e.g. ".svs" — enables extension-mismatch check
 
 
 class FilenameValidationResponse(BaseModel):
@@ -425,6 +426,7 @@ class FilenameValidationResponse(BaseModel):
     errors: list[ValidationIssue] = []
     warnings: list[ValidationIssue] = []
     suggested_correction: Optional[str] = None
+    normalized_filename: Optional[str] = None  # stain-canonicalized form when different
 
 
 # ---------------------------------------------------------------------------
@@ -690,4 +692,125 @@ class RunnerItem(BaseModel):
 class ServicesHealthResponse(BaseModel):
     runners: list[RunnerItem]
     stale_threshold_seconds: int
+    as_of: datetime
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.5 — Upload Operations
+# ---------------------------------------------------------------------------
+
+
+class UploadQueueItem(BaseModel):
+    id: int
+    slide_id: Optional[str] = None
+    filename: str
+    scanner_id: Optional[str] = None
+    uploader_host: Optional[str] = None
+    queued_at: datetime
+    estimated_upload_at: Optional[datetime] = None
+    upload_started_at: Optional[datetime] = None
+    upload_completed_at: Optional[datetime] = None
+    upload_status: str
+    retry_count: int
+    file_size_bytes: Optional[int] = None
+    priority: int
+    upload_speed_mbps: Optional[float] = None
+    failure_reason: Optional[str] = None
+    last_updated_at: datetime
+    is_delayed: bool = False
+
+
+class UploadQueueResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[UploadQueueItem]
+
+
+class UploadMetrics(BaseModel):
+    queued_count: int
+    active_count: int
+    completed_today: int
+    failed_count: int
+    delayed_count: int
+    avg_duration_seconds: Optional[float] = None
+    avg_throughput_mbps: Optional[float] = None
+
+
+class UploadIngestRecord(BaseModel):
+    slide_id: Optional[str] = None
+    filename: str
+    scanner_id: Optional[str] = None
+    uploader_host: Optional[str] = None
+    queued_at: datetime
+    estimated_upload_at: Optional[datetime] = None
+    upload_started_at: Optional[datetime] = None
+    upload_completed_at: Optional[datetime] = None
+    upload_status: str = "queued"
+    retry_count: int = 0
+    file_size_bytes: Optional[int] = None
+    priority: int = 5
+    upload_speed_mbps: Optional[float] = None
+    failure_reason: Optional[str] = None
+    last_updated_at: Optional[datetime] = None
+
+
+class UploadIngestRequest(BaseModel):
+    records: list[UploadIngestRecord]
+
+
+class UploadIngestResponse(BaseModel):
+    upserted_count: int
+    skipped_count: int
+
+
+class UploadQueueUpdateRequest(BaseModel):
+    upload_status: Optional[str] = None
+    estimated_upload_at: Optional[datetime] = None
+    upload_started_at: Optional[datetime] = None
+    upload_completed_at: Optional[datetime] = None
+    upload_speed_mbps: Optional[float] = None
+    failure_reason: Optional[str] = None
+    retry_count: Optional[int] = None
+
+
+class UploadFilterOptions(BaseModel):
+    scanners: list[str]
+    hosts: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 — Scanner Fleet
+# ---------------------------------------------------------------------------
+
+
+class ScannerConfig(BaseModel):
+    scanner_id: str
+    display_name: str
+    location: str = ""
+    vendor: str = "unknown"
+    enabled: bool = True
+
+
+class ScannerFleetResponse(BaseModel):
+    scanners: list[ScannerConfig]
+    total: int
+    enabled_count: int
+
+
+class ScannerSummaryItem(BaseModel):
+    scanner_id: str
+    display_name: str
+    location: str = ""
+    vendor: str = "unknown"
+    enabled: bool = True
+    queued: int = 0
+    active: int = 0
+    failed: int = 0
+    delayed: int = 0
+    total: int = 0
+
+
+class ScannerSummaryResponse(BaseModel):
+    scanners: list[ScannerSummaryItem]
     as_of: datetime

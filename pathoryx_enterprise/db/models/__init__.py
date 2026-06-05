@@ -20,3 +20,4 @@ from pathoryx_enterprise.db.models.failed_watcher import (  # noqa: F401
     TechnicianChange,
     WatchedFolderSnapshot,
 )
+from pathoryx_enterprise.db.models.upload_tracking import EstimatedUploadQueue  # noqa: F401

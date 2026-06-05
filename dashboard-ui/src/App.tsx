@@ -9,6 +9,7 @@ import { QueueMonitor } from './pages/QueueMonitor'
 import { RecoveryCenter } from './pages/RecoveryCenter'
 import { SlideDetail } from './pages/SlideDetail'
 import { SlideExplorer } from './pages/SlideExplorer'
+import { UploadOperations } from './pages/UploadOperations'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/failures"            element={<FailureCenter />} />
               <Route path="/recovery"            element={<RecoveryCenter />} />
               <Route path="/operations"          element={<OperationsCenter />} />
+              <Route path="/uploads"             element={<UploadOperations />} />
             </Routes>
           </Shell>
         </BrowserRouter>

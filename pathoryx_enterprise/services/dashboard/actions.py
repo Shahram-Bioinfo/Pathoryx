@@ -22,7 +22,6 @@ Review state lifecycle:
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Optional
 
@@ -34,6 +33,7 @@ from pathoryx_enterprise.db.repositories.failed_watcher import (
 )
 from pathoryx_enterprise.db.session import get_session
 from pathoryx_enterprise.services.recovery_sentry.recovery_engine import process_recovery
+from pathoryx_enterprise.services.recovery_sentry.filename_validator import FilenameValidator
 from pathoryx_enterprise.services.recovery_sentry.slide_id_parser import (
     SUPPORTED_EXTENSIONS,
     parse_slide_id,
@@ -44,10 +44,6 @@ logger = logging.getLogger(__name__)
 
 _RUNNER_ID = "dashboard"
 _SERVICE_NAME = "dashboard"
-
-# Regex to detect a recognisable CaseID prefix even when the rest of the
-# filename is wrong — used for "partially_valid" classification.
-_CASE_ID_PREFIX_RE = re.compile(r"^(N\d{10})")
 
 # Valid review-state transitions.  Keys are the *current* status; values are
 # the set of statuses the operator may transition to from that state.
@@ -72,118 +68,26 @@ class ActionError(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def validate_filename_structured(filename: str) -> dict:
+def validate_filename_structured(
+    filename: str,
+    *,
+    original_extension: Optional[str] = None,
+    config_requires_timestamp: bool = False,
+) -> dict:
     """
-    Validate *filename* against the Pathoryx slide ID format and return a
-    richly structured result.
+    Validate *filename* against the Pathoryx slide ID rules.
 
-    Designed for live UI feedback — safe to call on every keystroke.
+    Delegates to FilenameValidator — safe to call on every keystroke.
     Does NOT touch the filesystem or DB.
 
-    Classification values:
-      valid          — parse succeeds; all components present
-      partially_valid — case ID is recognisable but rest of structure is wrong,
-                        OR parse succeeds but timestamp absent (recoverable via
-                        WSI metadata extraction)
-      invalid        — extension unsupported OR completely unrecognised
+    Returns a plain dict compatible with FilenameValidationResponse.
     """
-    stripped = (filename or "").strip()
-
-    base: dict = {
-        "filename": stripped,
-        "classification": "invalid",
-        "components": None,
-        "errors": [],
-        "warnings": [],
-        "suggested_correction": None,
-    }
-
-    if not stripped:
-        base["errors"].append({"code": "empty", "message": "Filename cannot be empty"})
-        return base
-
-    if "/" in stripped or "\\" in stripped or stripped != Path(stripped).name:
-        base["errors"].append({
-            "code": "path_traversal",
-            "message": "Filename must be a plain name with no directory components",
-        })
-        return base
-
-    if ".." in stripped:
-        base["errors"].append({"code": "dotdot", "message": "Filename must not contain '..'"})
-        return base
-
-    p = Path(stripped)
-    ext = p.suffix.lower()
-    stem = p.stem
-
-    if not ext:
-        base["errors"].append({"code": "no_extension", "message": "Filename must have a file extension"})
-        return base
-
-    if ext not in SUPPORTED_EXTENSIONS:
-        base["errors"].append({
-            "code": "invalid_extension",
-            "message": (
-                f"Extension '{ext}' is not a supported WSI format. "
-                f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-            ),
-        })
-        return base
-
-    # Try the real parser
-    parsed = parse_slide_id(stripped)
-    if parsed is not None:
-        base["components"] = {
-            "case_id": parsed.case_id,
-            "pot": parsed.pot,
-            "block": parsed.block,
-            "section": parsed.section,
-            "stain": parsed.stain,
-            "timestamp": parsed.timestamp_iso_z,
-            "extension": parsed.extension,
-        }
-        if parsed.has_timestamp:
-            base["classification"] = "valid"
-        else:
-            base["classification"] = "partially_valid"
-            base["warnings"].append({
-                "code": "no_timestamp",
-                "message": (
-                    "Timestamp absent — system will attempt to extract acquisition time "
-                    "from WSI metadata. If unavailable, manual review will be required."
-                ),
-            })
-        return base
-
-    # parse_slide_id failed — diagnose the reason
-    m = _CASE_ID_PREFIX_RE.match(stem)
-    if m:
-        case_id = m.group(1)
-        base["classification"] = "partially_valid"
-        base["components"] = {
-            "case_id": case_id,
-            "pot": None, "block": None, "section": None,
-            "stain": None, "timestamp": None, "extension": ext,
-        }
-        base["errors"].append({
-            "code": "invalid_structure",
-            "message": (
-                f"Case ID '{case_id}' is recognisable, but the structure after it is invalid. "
-                f"Expected: {case_id}<POT>-<BLOCK>-<SECTION>-<STAIN>[_UTC<ts>]{ext}"
-            ),
-        })
-        base["suggested_correction"] = f"{case_id}SA-1-1-H&E{ext}"
-    else:
-        base["errors"].append({
-            "code": "unrecognized",
-            "message": (
-                "Filename does not match the Pathoryx slide ID format. "
-                "Required: N<10-digits><POT>-<BLOCK>-<SECTION>-<STAIN>[_UTC<timestamp>].<ext>"
-            ),
-        })
-
-    return base
+    result = FilenameValidator.validate(
+        filename,
+        original_extension=original_extension,
+        config_requires_timestamp=config_requires_timestamp,
+    )
+    return result.to_dict()
 
 
 # ---------------------------------------------------------------------------

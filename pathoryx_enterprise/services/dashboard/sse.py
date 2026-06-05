@@ -13,13 +13,15 @@ Design:
   No database schema changes, no triggers, no sequences, no new tables.
 
 Watched tables and detection strategies
-  core.service_trigger       MAX(internal_id) — new triggers
-                             COUNT(status IN pending,running) — queue depth shifts
-  events.pipeline_events     MAX(event_id)   — new events (append-only)
-  core.file_records          MAX(internal_id) — new records
-                             MAX(updated_at) — status changes on existing records
-  failed_watcher.*           MAX(internal_id) — new recovery/technician events
-  core.runner_registrations  MAX(last_heartbeat_at) — runner liveness changes
+  core.service_trigger             MAX(internal_id) — new triggers
+                                   COUNT(status IN pending,running) — queue depth shifts
+  events.pipeline_events           MAX(event_id)   — new events (append-only)
+  core.file_records                MAX(internal_id) — new records
+                                   MAX(updated_at) — status changes on existing records
+  failed_watcher.*                 MAX(internal_id) — new recovery/technician events
+  core.runner_registrations        MAX(last_heartbeat_at) — runner liveness changes
+  upload_tracking.estimated_upload MAX(id) — new queue entries
+                                   MAX(last_updated_at) — status changes
 """
 from __future__ import annotations
 
@@ -34,6 +36,7 @@ from sqlalchemy.orm import Session
 from pathoryx_enterprise.db.models.core import FileRecord, RunnerRegistration, ServiceTrigger
 from pathoryx_enterprise.db.models.events import PipelineEvent
 from pathoryx_enterprise.db.models.failed_watcher import TechnicianChange
+from pathoryx_enterprise.db.models.upload_tracking import EstimatedUploadQueue
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,8 @@ class SseCheckpoints:
     file_max_updated:     datetime | None = None
     recovery_max_id:      int            = 0
     runner_max_heartbeat: datetime | None = None
+    upload_max_id:        int            = 0
+    upload_max_updated:   datetime | None = None
     # False until the first successful DB read completes.
     initialized:          bool           = False
 
@@ -126,6 +131,20 @@ def _query_runner_max_heartbeat(session: Session) -> datetime | None:
     )
 
 
+def _query_upload_max_id(session: Session) -> int:
+    return _scalar_int(
+        session.execute(select(func.max(EstimatedUploadQueue.id))).scalar()
+    )
+
+
+def _query_upload_max_updated(session: Session) -> datetime | None:
+    return _scalar_dt(
+        session.execute(
+            select(func.max(EstimatedUploadQueue.last_updated_at))
+        ).scalar()
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -167,6 +186,12 @@ def init_checkpoints(session: Session) -> SseCheckpoints:
         cp.runner_max_heartbeat = _query_runner_max_heartbeat(session)
     except Exception as exc:
         logger.debug("SSE init: runner query failed: %s", exc)
+
+    try:
+        cp.upload_max_id = _query_upload_max_id(session)
+        cp.upload_max_updated = _query_upload_max_updated(session)
+    except Exception as exc:
+        logger.debug("SSE init: upload_queue query failed: %s", exc)
 
     cp.initialized = True
     return cp
@@ -252,6 +277,24 @@ def poll_changes(session: Session, cp: SseCheckpoints) -> list[dict]:
     except Exception as exc:
         logger.debug("SSE poll: runner query failed: %s", exc)
 
+    # ── Upload queue (new rows + status changes) ──────────────────────────────
+    try:
+        new_uid = _query_upload_max_id(session)
+        new_uup = _query_upload_max_updated(session)
+        id_changed = new_uid != cp.upload_max_id
+        ts_advanced = (
+            new_uup is not None
+            and cp.upload_max_updated is not None
+            and new_uup > cp.upload_max_updated
+        )
+        if id_changed or ts_advanced:
+            events.append({"type": "upload_queue_updated", "ts": now_ts})
+        cp.upload_max_id = new_uid
+        if new_uup is not None:
+            cp.upload_max_updated = new_uup
+    except Exception as exc:
+        logger.debug("SSE poll: upload_queue query failed: %s", exc)
+
     return events
 
 
@@ -265,6 +308,8 @@ def _silent_init(session: Session, cp: SseCheckpoints) -> None:
         cp.file_max_updated = _query_file_max_updated(session)
         cp.recovery_max_id = _query_recovery_max_id(session)
         cp.runner_max_heartbeat = _query_runner_max_heartbeat(session)
+        cp.upload_max_id = _query_upload_max_id(session)
+        cp.upload_max_updated = _query_upload_max_updated(session)
     except Exception as exc:
         logger.warning("SSE: silent init failed: %s", exc)
     cp.initialized = True
