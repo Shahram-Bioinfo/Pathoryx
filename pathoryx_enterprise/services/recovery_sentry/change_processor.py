@@ -1,20 +1,12 @@
 """
 RecoverySentry change processor.
 
-Integrates change detection (from failed_watcher infrastructure) with the
-RecoverySentry recovery engine. Each scan cycle:
-
+Each scan cycle:
   1. Scan each watched folder for current filesystem state.
   2. Compare against DB snapshots → detect changes.
   3. For each stable new/modified file: attempt recovery.
   4. Record all changes and outcomes in DB.
   5. Emit events.
-
-Reuses:
-  - failed_watcher.change_detector.scan_folder / detect_changes
-  - failed_watcher.WatchedFolderSnapshotRepository
-  - failed_watcher.TechnicianChangeRepository
-  - recovery_engine.process_recovery / record_manual_review_required
 """
 from __future__ import annotations
 
@@ -27,7 +19,7 @@ from pathoryx_enterprise.db.repositories.failed_watcher import (
     WatchedFolderSnapshotRepository,
 )
 from pathoryx_enterprise.db.session import get_session
-from pathoryx_enterprise.services.failed_watcher.change_detector import (
+from pathoryx_enterprise.services.recovery_sentry.change_detector import (
     ChangeEvent,
     detect_changes,
     scan_folder,

@@ -1,21 +1,18 @@
 """
 BabelShark enrichment pipeline stage runner.
 
-Matches the execution model of runner_daily_enterprise.py exactly.
-
-Stage execution order (matches runner_daily_enterprise.py):
+Stage execution order (ROI before stain is critical — do not reorder):
   1. label_extraction        — Extract label/macro image from WSI
-  2. color_marker_detection  — Optional color marker detection (feature-flagged)
+  2. color_marker_detection  — Optional, feature-flagged
   3. datamatrix              — Decode DataMatrix barcode from label PNG
   4. roi_fallback            — ROI-based metadata for DataMatrix failures (BEFORE stain)
-  5. stain_extraction        — OCR-based stain type detection (AFTER ROI)
-  6. extra_field_extraction  — Optional extra field extraction (feature-flagged)
-  7. pasnet_validation       — Validate against PASNET/LIS database (feature-flagged)
+  5. stain_extraction        — OCR stain detection (AFTER ROI)
+  6. extra_field_extraction  — Optional, feature-flagged
+  7. pasnet_validation       — LIS lookup, feature-flagged (disabled by default)
   8. slide_id_generation     — Build SlideID, rename, route the file
-  9. dicom_metadata_writing  — Optional DICOM metadata writing (feature-flagged)
+  9. dicom_metadata_writing  — Optional, feature-flagged
 
-Shared output layout (matches runner_daily_enterprise.py):
-  Operator-facing shared outputs under daily_dir = run_output_dir / YYYY-MM-DD:
+Shared output layout (under daily_dir = run_output_dir / YYYY-MM-DD):
     datamatrix_results.xlsx
     stain_results.xlsx
     slide_metadata.xlsx
@@ -27,7 +24,7 @@ Shared output layout (matches runner_daily_enterprise.py):
     failed_fallback/
     .work/slide_{id}_{stem}/   — per-slide debug workspace (internal only)
 
-ROI fallback fix:
+ROI fallback note:
   temp_config_roi.yaml is written with all required keys including
   roiset_selector.layout_model.model_dir (fixes KeyError('model_dir')).
   All resource paths are made absolute before writing configs.
@@ -39,7 +36,7 @@ Enterprise integration:
   - Records wall-clock timing and RSS memory snapshots
   - Correlation IDs propagate through every event and log record
   - Deferred QC trigger: fired only after enrichment completes
-  - DB status: dicom_pending (never READY_FOR_DICOMIZER)
+  - DB status: qc_pending after successful enrichment
 """
 from __future__ import annotations
 

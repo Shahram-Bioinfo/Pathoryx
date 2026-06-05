@@ -28,7 +28,7 @@ pathoryx-babelshark
 pathoryx-qc
 pathoryx-dicom
 pathoryx-uploader
-pathoryx-failed-watcher
+pathoryx-recovery-sentry
 ```
 
 For detailed setup instructions, see [SETUP.md](SETUP.md).

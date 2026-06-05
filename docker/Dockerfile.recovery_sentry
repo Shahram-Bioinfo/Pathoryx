@@ -1,31 +1,27 @@
 # RecoverySentry service image.
-# Monitors failed/suspicious folders, validates slide IDs, and auto-recovers
-# technician-corrected WSI files back into the Pathoryx pipeline.
+# Monitors failed/suspicious/manual_review folders and auto-recovers valid slides.
 
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
-    libopenslide0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY pyproject.toml .
 COPY pathoryx_enterprise/ pathoryx_enterprise/
-COPY configs/recovery_sentry.yaml configs/recovery_sentry.yaml
 
 RUN pip install --no-cache-dir \
     psycopg2-binary sqlalchemy alembic \
     pydantic pydantic-settings structlog \
     prometheus-client opentelemetry-sdk \
     opentelemetry-exporter-otlp-proto-grpc \
-    python-dotenv pyyaml openslide-python
+    python-dotenv
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    RECOVERY_SENTRY_CONFIG=./configs/recovery_sentry.yaml
+    PYTHONPATH=/app
 
 RUN groupadd -r pathoryx && useradd -r -g pathoryx pathoryx
 USER pathoryx

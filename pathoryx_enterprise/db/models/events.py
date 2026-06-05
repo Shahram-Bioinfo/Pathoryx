@@ -26,9 +26,13 @@ STANDARD EVENT TYPES (extend as needed):
   upload.completed
   upload.failed
   upload.retry
-  failed_watcher.change_detected
-  failed_watcher.technician_action_recorded
-  failed_watcher.requeued
+  recovery_sentry.change_detected
+  recovery_sentry.auto_recovered
+  recovery_sentry.manual_review_required
+  recovery_sentry.qc_requeued
+  recovery_sentry.timestamp_extracted
+  recovery_sentry.timestamp_added
+  dashboard.review_state_updated
   runner.started
   runner.shutdown
   runner.heartbeat

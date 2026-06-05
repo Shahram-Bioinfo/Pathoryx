@@ -116,7 +116,7 @@ WHERE global_artifact_id = 'YOUR_ARTIFACT_ID'
 
 ## Level 3: Failure recovery test
 
-To test dead-letter queue and failed watcher:
+To test dead-letter queue and recovery:
 
 1. Stop the QC service mid-run (SIGKILL).
 2. The trigger remains in `running` status.

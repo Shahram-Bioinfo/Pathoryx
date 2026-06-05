@@ -13,7 +13,7 @@ version: "3.9"
 #   qc           health=8082  metrics=9092
 #   dicom        health=8083  metrics=9093
 #   uploader     health=8084  metrics=9094
-#   failed_watcher health=8085 metrics=9095
+#   recovery_sentry health=8087 metrics=9097
 #   prometheus   9090
 #   postgres     5432 (not exposed to host by default)
 
@@ -160,24 +160,26 @@ services:
       - "9094:9094"
 
   # ---------------------------------------------------------------------------
-  # Failed Watcher
+  # RecoverySentry — watches failed/suspicious/manual_review for technician corrections
   # ---------------------------------------------------------------------------
-  failed_watcher:
+  recovery_sentry:
     <<: *common
     build:
       context: .
-      dockerfile: docker/Dockerfile.failed_watcher
+      dockerfile: docker/Dockerfile.recovery_sentry
     environment:
       <<: *common-env
-      FAILED_WATCHER_FOLDERS: ${FAILED_WATCHER_FOLDERS}
-      FAILED_WATCHER_LABELS: ${FAILED_WATCHER_LABELS:-}
-      PATHORYX_HEALTH_PORT: "8085"
-      PATHORYX_METRICS_PORT: "9095"
+      RECOVERY_SENTRY_CONFIG: ${RECOVERY_SENTRY_CONFIG:-./configs/recovery_sentry.yaml}
+      PATHORYX_HEALTH_PORT: "8087"
+      PATHORYX_METRICS_PORT: "9097"
     ports:
-      - "8085:8085"
-      - "9095:9095"
+      - "8087:8087"
+      - "9097:9097"
     volumes:
-      - ${WATCH_FOLDER:-/data/watch}:/watch:ro
+      - ${FAILED_DIR:-/data/failed}:/data/failed
+      - ${SUSPICIOUS_DIR:-/data/suspicious}:/data/suspicious
+      - ${MANUAL_REVIEW_DIR:-/data/manual_review}:/data/manual_review
+      - ${FINAL_DIR:-/data/final}:/data/final
 
   # ---------------------------------------------------------------------------
   # Prometheus (scrapes all service metrics)
@@ -195,7 +197,7 @@ services:
       - qc
       - dicom
       - uploader
-      - failed_watcher
+      - recovery_sentry
 
 networks:
   pathoryx_net:

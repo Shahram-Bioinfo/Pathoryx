@@ -63,7 +63,7 @@ pathoryx-babelshark &
 pathoryx-qc &
 pathoryx-dicom &
 pathoryx-uploader &
-pathoryx-failed-watcher &
+pathoryx-recovery-sentry &
 ```
 
 ## Step 6 — Start Services (Docker)

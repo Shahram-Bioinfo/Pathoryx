@@ -88,7 +88,7 @@ pathoryx-babelshark --help
 pathoryx-qc --help
 pathoryx-dicom --help
 pathoryx-uploader --help
-pathoryx-failed-watcher --help
+pathoryx-recovery-sentry --help
 pathoryx-orchestrate --help
 ```
 
@@ -105,7 +105,7 @@ pathoryx-babelshark
 pathoryx-qc
 pathoryx-dicom
 pathoryx-uploader
-pathoryx-failed-watcher
+pathoryx-recovery-sentry
 ```
 
 Optional: health monitor

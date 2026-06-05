@@ -16,7 +16,7 @@ State machine for FileRecord.status:
   dicom_pending → dicom_running → dicom_done | dicom_failed
   dicom_done → upload_pending
   upload_pending → upload_running → uploaded | upload_failed
-  *_failed → (failed_watcher monitoring, possible requeue)
+  *_failed → (RecoverySentry monitoring, possible requeue)
 """
 from __future__ import annotations
 
@@ -236,7 +236,7 @@ class ServiceTrigger(Base, TimestampMixin):
     Unique constraint prevents duplicate triggers for the same (source→target, stage, file).
 
     Dead-letter strategy: triggers with retry_count >= max_retries and
-    trigger_status = 'failed' are moved to the failed_watcher for review.
+    trigger_status = 'failed' are surfaced via RecoverySentry for review.
     """
 
     __tablename__ = "service_trigger"

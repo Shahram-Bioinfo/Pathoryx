@@ -33,8 +33,8 @@ Pathoryx Enterprise is a **production-grade WSI (Whole Slide Image) ingestion an
 | **QC Service** | `pathoryx-qc` | 8082 | 9092 | `pathoryx_enterprise.services.qc` |
 | **DICOM Service** | `pathoryx-dicom` | 8083 | 9093 | `pathoryx_enterprise.services.dicom` |
 | **Uploader** | `pathoryx-uploader` | 8084 | 9094 | `pathoryx_enterprise.services.uploader` |
-| **RecoverySentry** (aka FailedWatcher) | `pathoryx-recovery-sentry` | 8087 | 9097 | `pathoryx_enterprise.services.recovery_sentry` |
-| **Failed Watcher** (legacy CLI) | `pathoryx-failed-watcher` | 8085 | 9095 | `pathoryx_enterprise.services.failed_watcher` |
+| **RecoverySentry** | `pathoryx-recovery-sentry` | 8087 | 9097 | `pathoryx_enterprise.services.recovery_sentry` |
+| ~~Failed Watcher~~ | ~~`pathoryx-failed-watcher`~~ | ~~8085~~ | ~~9095~~ | **DEPRECATED** — stub prints error and exits; use `pathoryx-recovery-sentry` |
 | **Dashboard** | `pathoryx-dashboard` | 8090 | — | `pathoryx_enterprise.services.dashboard` |
 | **Orchestrator** | `pathoryx-orchestrate` | — | — | `pathoryx_enterprise.orchestrator` |
 
@@ -467,8 +467,7 @@ mypy pathoryx_enterprise/
 - Exact `runner_daily_enterprise.py` usage vs. `stage_runner.py` — the legacy runner still exists at root level; unclear whether it is actively used in production or is superseded entirely by `stage_runner.py`
 - `qc_service.yaml` content not inspected separately (separate from `qc_config.yaml`)
 - `pathoryx_enterprise/services/recovery_sentry/recovery_engine.py` internals not fully inspected — auto-recovery implementation details beyond what `RECOVERY_SENTRY.md` documents
-- `pathoryx_enterprise/services/failed_watcher/` vs `recovery_sentry/` — both services exist; exact behavioral difference and which one the orchestrator runs by default needs verification
-- Docker image build status — `Dockerfile.*` files exist but no record of whether images have been built and tested end-to-end
+- Docker image build status — `Dockerfile.*` files exist but images have not been built and tested end-to-end in CI
 
 ---
 
@@ -505,3 +504,117 @@ mypy pathoryx_enterprise/
 | `.env` not committed | Confirmed — `.gitignore` excludes `.env` and `*.env` |
 | `.env.example` placeholders only | Confirmed — all secrets are `CHANGE_ME` |
 | Runtime `data/` folders | All empty (`.gitkeep` only); `data/` in `.gitignore` with `!data/**/.gitkeep` exception |
+
+---
+
+## Phase 3 Changelog (2026-06-05)
+
+### Architecture decision: RecoverySentry is the only recovery path
+
+`services/failed_watcher/` (the old FailedWatcher service) has been retired. RecoverySentry is now the single, canonical recovery engine.
+
+### Files removed
+| File | Reason |
+|------|--------|
+| `runner_daily_enterprise.py` (root, 1510 lines) | Legacy batch runner; superseded entirely by `stage_runner.py` |
+| `services/failed_watcher/runner.py` | Dead service poll loop |
+| `services/failed_watcher/watcher.py` | Dead scan implementation |
+| `services/failed_watcher/requeue_service.py` | Dead; never imported by RecoverySentry |
+| `services/failed_watcher/config.py` | Dead config for removed runner |
+| `docker/Dockerfile.failed_watcher` | Replaced by `docker/Dockerfile.recovery_sentry` |
+| `tests/integration/test_failed_watcher_e2e.py` | Tested removed infrastructure |
+
+### Files added/created
+| File | Purpose |
+|------|---------|
+| `services/recovery_sentry/change_detector.py` | Moved here from `failed_watcher/` (canonical location) |
+| `docker/Dockerfile.recovery_sentry` | Correct container for RecoverySentry (ports 8087/9097) |
+| `tests/unit/test_phase3_recovery_finalization.py` | 14 new tests (see below) |
+
+### Files converted to stubs/shims
+| File | Change |
+|------|--------|
+| `services/failed_watcher/change_detector.py` | Now a re-export shim pointing to `recovery_sentry.change_detector` |
+| `services/failed_watcher/__init__.py` | Deprecation notice |
+| `services/failed_watcher/main.py` | Deprecation stub: prints error message and exits with code 1 |
+
+### Code fixes
+| File | Fix |
+|------|-----|
+| `services/dashboard/app.py` | Added missing `from pathlib import Path` import (bug: `Path` was used in `label_image` endpoint but never imported; would have caused 500 at runtime) |
+| `services/babelshark/stage_runner.py` | Removed all `runner_daily_enterprise.py` references from module docstring |
+| `db/models/core.py` | Updated service name in comments: `failed_watcher` → `RecoverySentry` |
+| `db/models/events.py` | Updated standard event type list to use `recovery_sentry.*` types |
+| `db/repositories/trigger.py` | Updated dead-letter strategy comment |
+| `services/babelshark/db_writer.py` | Updated service reference comment |
+| `tests/unit/test_change_detector.py` | Updated import to canonical `recovery_sentry.change_detector` path |
+| `dashboard-ui/src/utils/formatters.ts` | `failed_watcher` now maps to `'RecoverySentry'` (was 'RecoverySentry Legacy Watcher') |
+
+### Infrastructure updated
+| File | Change |
+|------|--------|
+| `docker-compose.yml` | `failed_watcher` service replaced by `recovery_sentry` (ports 8087/9097, correct volumes) |
+| `prometheus.yml` | Scrape target updated to `recovery_sentry:9097` |
+| `pyproject.toml` | `pathoryx-failed-watcher` entry annotated as deprecated (still registered so users get helpful error) |
+| `ARCHITECTURE.md` | Service table updated |
+| `OPERATIONS.md` | CLI and requeue section updated |
+| `RUNBOOK.md` | CLI updated |
+| `SETUP.md` | CLI updated |
+| `MIGRATION_PLAN.md` | CLI updated |
+| `README.md` | CLI updated |
+| `RECOVERY_SENTRY.md` | Backward-compat section replaced with migration notes |
+| `TESTING_WITH_REAL_DATA.md` | `failed watcher` references updated |
+| `TROUBLESHOOTING.md` | Service name updated |
+| `CLAUDE.md` | Removed infrastructure section added |
+
+### New tests (14 added in `test_phase3_recovery_finalization.py`)
+| Class | What it verifies |
+|-------|-----------------|
+| `TestChangeDetectorShim` | Old import path still works; old and new imports are the same object |
+| `TestDeprecatedCLIStub` | `pathoryx-failed-watcher` main() exits with code 1 |
+| `TestQuarantineBehavior` | Invalid/unsupported filenames stay in watch folder, never moved |
+| `TestRequeueBehavior` | Valid auto-recovered file always enqueues a QC trigger |
+| `TestRenameAuditFlow` | Dashboard rename creates `TechnicianChange` with `inferred_action='dashboard_correction'`; works without a technician note |
+| `TestInvalidTransitionRejected` | Invalid review-state transitions return 422 |
+| `TestTerminalState` | `reviewed` state has no outgoing transitions; all expected states present |
+| `TestLabelPreviewDegrades` | Missing label dir returns 404 (not 500); DB error on preview returns 200 with `available=False` |
+
+### Finalized RecoverySentry review state machine
+```
+detected → investigating → corrected → requeued → reviewed  (terminal)
+detected → dismissed ↔ detected  (re-openable)
+unlinked → investigating | dismissed
+linked   → investigating | reviewed
+corrected → investigating  (can revisit)
+```
+Every transition emits an immutable `dashboard.review_state_updated` PipelineEvent.
+
+### Technician workflow (how to use)
+1. **Dashboard → Recovery Center**: see all files in `failed/`, `suspicious/`, `manual_review/`
+2. **Click a file** → opens TechnicianReviewDrawer showing filename, parsed metadata, label image (if available)
+3. **Type corrected filename** → real-time validation shows `valid` / `partially_valid` / `invalid` classification
+4. **Click Apply Rename** → file renamed on disk; RecoverySentry runs auto-recovery logic:
+   - If valid SlideID + timestamp → moves to `final/<CaseID>/` → QC trigger created
+   - If valid SlideID, no timestamp → timestamp extracted from WSI metadata → same path
+   - If timestamp missing from metadata → stays in watch folder, flagged `manual_review_required`
+5. **Alternatively**: rename file directly in the watched folder → RecoverySentry detects it on the next 30 s poll cycle and runs the same recovery logic automatically
+6. **Review state** can be manually advanced via the PATCH endpoint for operational tracking
+
+### Verification results
+| Check | Result |
+|-------|--------|
+| Unit tests | **314 / 314 passed** (300 pre-existing + 14 new) |
+| Dashboard frontend build | **Clean** — 0 TypeScript errors, 1908 modules |
+| `app.py` `Path` import bug | **Fixed** |
+| `change_detector.py` canonical location | `services/recovery_sentry/change_detector.py` |
+| Old import path backward compat | `services/failed_watcher/change_detector.py` re-exports correctly |
+
+### Known remaining risks before Windows migration
+| Risk | Status |
+|------|--------|
+| Docker images not built or tested | Dockerfiles updated but no CI build verification |
+| `configs/dicom_config_production.yaml` has live upload settings | Known, labeled clearly; never use for testing |
+| `pasnet_validation` disabled | Intentional; credentials not configured |
+| `slide_id_generator.dry_run: true` | Intentional; file renames not executing |
+| Real C-STORE upload requires PACS connectivity | Must be verified before enabling |
+| End-to-end test with real WSI files | Not yet done |

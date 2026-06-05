@@ -18,7 +18,7 @@ pathoryx-babelshark
 pathoryx-qc
 pathoryx-dicom
 pathoryx-uploader
-pathoryx-failed-watcher
+pathoryx-recovery-sentry
 pathoryx-health    # HTTP health endpoints
 
 # Option C: Docker Compose
@@ -356,7 +356,7 @@ kill -TERM $(pgrep -f pathoryx-qc)
 pathoryx-qc &
 ```
 
-In-flight slides are not lost: triggers remain `running` and will be recovered by the failed watcher if the service doesn't reconnect within the heartbeat timeout.
+In-flight slides are not lost: triggers remain `running` and will be visible in the Operations Center stuck-trigger view. RecoverySentry can requeue them if the service doesn't reconnect within the heartbeat timeout.
 
 ### Rollback
 

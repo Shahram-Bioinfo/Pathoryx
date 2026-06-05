@@ -12,7 +12,7 @@ pathoryx-babelshark
 pathoryx-qc
 pathoryx-dicom
 pathoryx-uploader
-pathoryx-failed-watcher
+pathoryx-recovery-sentry
 
 # Graceful stop: send SIGTERM
 kill -TERM <pid>
@@ -91,13 +91,8 @@ FROM failed_watcher.technician_changes tc
 WHERE tc.review_status IN ('detected', 'linked', 'unlinked')
 ORDER BY tc.detected_at ASC;
 
--- Requeue a slide (via Python)
-from pathoryx_enterprise.services.failed_watcher.requeue_service import RequeueService
-from pathoryx_enterprise.db.session import get_session
-
-with get_session() as session:
-    svc = RequeueService(session)
-    svc.requeue_slide(change_id=123, technician_id="dr.smith", target_stage="qc")
+-- Requeue via dashboard: Recovery Center → select file → validate filename → Apply rename
+-- Or via SQL (see RECOVERY_SENTRY.md for the manual requeue SQL):
 ```
 
 ## Dead-Letter Queue

@@ -233,7 +233,7 @@ class BabelSharkDBWriter:
 
         FileRecord status is intentionally left unchanged: the slide stays at
         whatever lifecycle state it had before the failed intake attempt
-        (typically 'detected' or 'intake_running').  The failed_watcher monitors
+        (typically 'detected' or 'intake_running').  RecoverySentry monitors
         stale records for operator review.
 
         'failed' is NOT written here — it is not in ck_file_records_status and

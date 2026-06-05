@@ -8,7 +8,7 @@ and sleep until the next poll cycle.
 
 Dead-letter recovery:
   Triggers with retry_count >= max_retries are left in 'failed' status.
-  The failed_watcher service monitors these and can requeue or escalate.
+  RecoverySentry monitors these and can requeue or escalate via the dashboard.
 """
 from __future__ import annotations
 

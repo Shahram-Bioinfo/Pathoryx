@@ -70,7 +70,7 @@ export function fmtServiceName(name: string): string {
     upload_service:  'Upload Service',
     uploader:        'Upload Service',
     recovery_sentry: 'RecoverySentry',
-    failed_watcher:  'RecoverySentry Legacy Watcher',
+    failed_watcher:  'RecoverySentry',
   }
   return map[name.toLowerCase()] ?? name
 }

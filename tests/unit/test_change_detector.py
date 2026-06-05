@@ -1,9 +1,9 @@
-"""Unit tests for the failed watcher change detector."""
+"""Unit tests for the RecoverySentry change detector."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from pathoryx_enterprise.services.failed_watcher.change_detector import detect_changes
+from pathoryx_enterprise.services.recovery_sentry.change_detector import detect_changes
 
 
 def _make_snap(file_path: str, filename: str, file_size: int, mtime_ns: int):

@@ -271,9 +271,9 @@ Recovery steps:
 
 ---
 
-## Backward compatibility
+## Migration notes
 
-- `pathoryx-failed-watcher` CLI still works (unchanged service).
-- `PATHORYX_SERVICES=failed_watcher` in orchestrator routes to `pathoryx-recovery-sentry`.
-- `FAILED_WATCHER_FOLDERS` env var still works as a fallback for watch folder config.
-- `failed_watcher` DB schema name is preserved — no migration risk.
+- `pathoryx-failed-watcher` CLI is **deprecated** — it prints an error and exits. Use `pathoryx-recovery-sentry`.
+- `PATHORYX_SERVICES=failed_watcher` in the orchestrator still routes to `pathoryx-recovery-sentry` via a backward-compat alias.
+- `FAILED_WATCHER_FOLDERS` env var still works as a fallback for watch folder config (RecoverySentry reads it).
+- `failed_watcher` **DB schema name is preserved** — `failed_watcher.technician_changes` and `failed_watcher.watched_folder_snapshots` are the live tables. No migration needed.

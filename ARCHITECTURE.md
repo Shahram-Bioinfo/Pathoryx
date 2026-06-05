@@ -14,8 +14,8 @@ DICOM conversion, and PACS upload. All inter-service communication goes through 
 | QC Service | `pathoryx-qc` | 8082/9092 | ML inference (penmark, bubble, stain, blur), accept/reject |
 | DICOM Service | `pathoryx-dicom` | 8083/9093 | WSI→DICOM conversion, storescu upload to Sectra |
 | Uploader | `pathoryx-uploader` | 8084/9094 | Final status tracking, circuit breaker, retry |
-| Failed Watcher | `pathoryx-failed-watcher` | 8085/9095 | Technician change detection, audit, requeue |
-| Orchestrator | `pathoryx-orchestrator` | — | Process supervisor (single-machine only) |
+| RecoverySentry | `pathoryx-recovery-sentry` | 8087/9097 | Watch failed/suspicious/manual_review; auto-recover or flag for technician review |
+| Orchestrator | `pathoryx-orchestrate` | — | Process supervisor (single-machine only) |
 
 ## Database Schema
 
@@ -54,7 +54,7 @@ qc_passed → dicom_pending
 dicom_pending → dicom_running → dicom_done | dicom_failed
 dicom_done → upload_pending
 upload_pending → upload_running → uploaded | upload_failed
-*_failed → (failed_watcher monitoring, possible requeue)
+*_failed → (RecoverySentry monitoring, possible requeue)
 ```
 
 ## Event Sourcing

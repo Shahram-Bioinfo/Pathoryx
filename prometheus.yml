@@ -19,6 +19,6 @@ scrape_configs:
     static_configs:
       - targets: ['uploader:9094']
 
-  - job_name: 'pathoryx-failed-watcher'
+  - job_name: 'pathoryx-recovery-sentry'
     static_configs:
-      - targets: ['failed_watcher:9095']
+      - targets: ['recovery_sentry:9097']
