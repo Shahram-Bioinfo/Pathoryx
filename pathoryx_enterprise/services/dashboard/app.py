@@ -192,6 +192,7 @@ DbDep = Annotated[Session, Depends(get_db)]
 
 import functools
 from .scanner_fleet import ScannerFleet
+from starlette.middleware.cors import CORSMiddleware
 
 
 @functools.lru_cache(maxsize=1)
@@ -365,6 +366,20 @@ def create_app() -> FastAPI:
         docs_url="/dashboard/docs",
         redoc_url="/dashboard/redoc",
         openapi_url="/dashboard/openapi.json",
+    )
+
+    # Allow the Vite dev servers (ports 5173 and 5174) to reach this API
+    # without CORS errors.  Same-origin production requests are unaffected.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+        ],
+        allow_methods=["GET", "POST", "PATCH"],
+        allow_headers=["Content-Type", "Accept"],
     )
 
     # ------------------------------------------------------------------

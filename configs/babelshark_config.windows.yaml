@@ -1,0 +1,227 @@
+# ============================================================
+# Palantir — BabelShark Runtime Configuration
+# Windows Production Environment
+#
+# Copy this file to configs\babelshark_config.yaml (or set
+# BABELSHARK_CONFIG_PATH in .env to point here directly).
+# ============================================================
+
+enable_full_pipeline: true
+defer_trigger: true
+
+pipeline_stages:
+  label_extraction: true
+  datamatrix: true
+  stain_extraction: true
+  roi_fallback: true
+  slide_id_generation: true
+  pasnet_validation: false
+
+watch_mode: true
+watch_interval_minutes: 1
+log_level: "INFO"
+
+operation_mode: "copy"
+dry_run: false
+timestamp_tag_enabled: true
+
+wsi_types:
+  - ".svs"
+  - ".ndpi"
+  - ".tif"
+  - ".tiff"
+  - ".scn"
+  - ".mrxs"
+  - ".bif"
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+
+watch_dir: "C:/Users/Public/projects/Palantir/data/watch"
+staging_dir: "C:/Users/Public/projects/Palantir/data/staging"
+failed_output_dir: "C:/Users/Public/projects/Palantir/data/failed"
+suspicious_output_routine_dir: "C:/Users/Public/projects/Palantir/data/suspicious"
+final_output_dir: "C:/Users/Public/projects/Palantir/data/final"
+final_slide_index_xlsx: "C:/Users/Public/projects/Palantir/data/final_slide_ids.xlsx"
+
+run_output_dir: "C:/Users/Public/projects/Palantir/data/run_output"
+metadata_excel_path: "C:/Users/Public/projects/Palantir/data/run_output/slide_metadata.xlsx"
+
+label_root_dir: "C:/Users/Public/projects/Palantir/data/labels"
+label_crops_dir: "C:/Users/Public/projects/Palantir/data/label_crops"
+
+# SQLite is used only as a legacy fallback; PostgreSQL is the primary DB.
+sqlite_db_path: "C:/Users/Public/projects/Palantir/data/WSI-Babel-Shark.sqlite"
+ops_table: "WSI_Babel_Shark_ops"
+
+scripts:
+  label_extractor: "./pathoryx_enterprise/services/babelshark/core/label_extractor.py"
+  datamatrix_reader: "./pathoryx_enterprise/services/babelshark/core/datamatrix_reader.py"
+  roi_metadata_extractor: "./pathoryx_enterprise/services/babelshark/core/roi_metadata_extractor.py"
+  stain_extractor: "./pathoryx_enterprise/services/babelshark/core/stain_extractor.py"
+  extra_field_extractor: "./pathoryx_enterprise/services/babelshark/core/extra_field_extractor.py"
+  pasnet_validator: "./pathoryx_enterprise/services/babelshark/core/pasnet_validator.py"
+  slide_id_creator: "./pathoryx_enterprise/services/babelshark/core/slide_id_generator.py"
+  sqlite_table_generator: "./pathoryx_enterprise/services/babelshark/core/database_manager.py"
+
+rotate_associated_label: false
+label_rotation_degrees_label: -90
+label_crop_ratio: 0.30
+label_rotation_degrees: -90
+wsi_macro_img_tag: "macro"
+
+stain_list_path: "./resources/stain_list.json"
+stain_replace_map_path: "./resources/stain_error_replacements.json"
+
+layout_model:
+  backend: "resnet-open-set"
+  model_dir: "./models"
+  params:
+    low_conf_gate: 0.90
+    candidate_min: 0.91
+
+roiset_selector:
+  roiset_root: "./roisets"
+
+roiset_root: "./roisets"
+
+pxl_offset: 8
+roi_pxl_offset: 12
+roi_debug_dir: "C:/Users/Public/projects/Palantir/data/roi_debug"
+debug_parts_root: "C:/Users/Public/projects/Palantir/data/roi_debug_parts"
+
+allowed_labid_letters:
+  - "E"
+  - "R"
+
+ocr_langs:
+  - "en"
+
+ocr_min_conf: 0.25
+ocr_text_threshold: 0.7
+ocr_ycenter_ths: 0.5
+ocr_slope_ths: 0.1
+ocr_paragraph: false
+save_ocr_inputs: false
+
+ocr_preprocess:
+  clahe: true
+  clahe_clip: 2.0
+  clahe_grid: 8
+  sharpen: true
+  sharpen_strength: 1.2
+
+registration:
+  enabled: false
+  method: "SIFT"
+  sift_nfeatures: 4000
+  sift_ratio: 0.75
+  max_features: 2000
+  good_match_ratio: 0.25
+
+classifier_strip:
+  enabled: false
+  side: "left"
+  fraction: 0.32
+
+label_strip:
+  enabled: false
+  side: "left"
+  fraction: 0.32
+
+group_ref_image_pattern: "{group}.png"
+use_group_ref_image_size: true
+use_group_ref_as_registration: false
+resize_to_ref: false
+
+extraction_rules:
+  Section:
+    allowed_chars: "0123456789"
+    replacement_patterns:
+      - ["[^0-9]", ""]
+      - ["^\\s+|\\s+$", ""]
+    default_value: "1"
+
+  Casenumber:
+    allowed_chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/ "
+    replacement_patterns:
+      - ["[\\\\/_\\-]", "/"]
+      - ["\\s+", " "]
+      - ["O", "0"]
+      - ["I", "1"]
+      - ["l", "1"]
+      - ["^\\s+|\\s+$", ""]
+    default_value: null
+
+  Pot-BlockID:
+    allowed_chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+    replacement_patterns:
+      - ["\\s+", " "]
+      - ["[^A-Z0-9 ]", ""]
+      - ["^\\s+|\\s+$", ""]
+    default_value: null
+
+  Stain:
+    replacement_patterns: []
+    default_value: null
+
+sqlite:
+  db_path: "C:/Users/Public/projects/Palantir/data/WSI-Babel-Shark.sqlite"
+  sqlite_source_table: "slides_raw"
+  sqlite_clean_table: "normalized_slides"
+  scanner_name_map:
+    test: "labtest"
+
+ocr_crop_config:
+  top: 0
+  bottom: 48
+  left: 30
+  right: 0
+
+extra_field_extractor:
+  enabled: false
+  input_dir: "C:/Users/Public/projects/Palantir/data/labels"
+  output_dir: "C:/Users/Public/projects/Palantir/data/run_output"
+  output_excel_name: "extra_field_results.xlsx"
+  debug_keys: false
+  only_fields:
+    - "Fresh1"
+    - "Fresh2"
+    - "city"
+
+slide_id_generator:
+  dry_run: true
+  final_output_dir: "C:/Users/Public/projects/Palantir/data/final"
+  failed_output_dir: "C:/Users/Public/projects/Palantir/data/failed"
+  final_slide_index_xlsx: "C:/Users/Public/projects/Palantir/data/final_slide_ids.xlsx"
+  extras:
+    enabled: false
+    sep: "_"
+    fields:
+      - "Fresh1"
+      - "city"
+    include_zero: false
+    default_value: "00"
+
+research_case_generator:
+  enabled: false
+  case_list_excel: "./resources/case_blacklist.xlsx"
+  destination_dir: "C:/Users/Public/projects/Palantir/data/special_cases"
+  excel_sheet: 0
+
+pasnet_validator:
+  enabled: false
+  mode: "pre_rename"
+  dry_run: true
+  fail_open: true
+  server_env: "PASNET_SERVER"
+  username_env: "PASNET_USERNAME"
+  password_env: "PASNET_PASSWORD"
+  report_xlsx_path: "C:/Users/Public/projects/Palantir/data/run_output/pasnet_validation_report.xlsx"
+  report_sheet_results: "results"
+  report_sheet_overrides: "overrides"
+  suspicious_output_routine_dir: "C:/Users/Public/projects/Palantir/data/suspicious"
+  sqlite_db_path: "C:/Users/Public/projects/Palantir/data/WSI-Babel-Shark.sqlite"
+  sqlite_auto_register: true
+  ops_table: "WSI_Babel_Shark_ops"
+  log_table: "WSI_Babel_Shark_pre_rename_pasnet_log"

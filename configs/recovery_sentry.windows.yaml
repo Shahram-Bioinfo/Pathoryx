@@ -1,0 +1,36 @@
+# =============================================================================
+# RecoverySentry — Configuration
+# Windows Production Environment
+#
+# Copy this file to configs\recovery_sentry.yaml (or set
+# RECOVERY_SENTRY_CONFIG in .env to point here directly).
+# =============================================================================
+
+service:
+  name: recovery_sentry
+  poll_interval_seconds: 30
+  stable_after_seconds: 10
+
+# Folders to monitor for technician corrections.
+watch_folders:
+  - "C:/Users/Public/projects/Palantir/data/failed"
+  - "C:/Users/Public/projects/Palantir/data/suspicious"
+  - "C:/Users/Public/projects/Palantir/data/manual_review"
+
+# Where recovered slides are moved to.
+final_destination_root: "C:/Users/Public/projects/Palantir/data/final"
+
+# BabelShark config to resolve final_output_dir if final_destination_root is not set.
+babelshark_config_path: ./configs/babelshark_config.yaml
+
+recovery:
+  auto_recover_valid_slide_id: true
+  add_timestamp_if_missing: true
+  overwrite_existing: false
+  duplicate_strategy: suffix
+  checksum_mode: partial
+  allow_filesystem_timestamp_fallback: false
+
+next_stage:
+  target_service: qc_service
+  stage_name: qc

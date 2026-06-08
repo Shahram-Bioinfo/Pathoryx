@@ -93,8 +93,10 @@ psql "postgresql://pathoryx_user:your_strong_password_here@localhost:5432/pathor
 
 ## 6. Configure environment variables
 
+Use the Windows-specific template which pre-fills Windows paths:
+
 ```powershell
-copy .env.example .env
+copy .env.windows.example .env
 notepad .env
 ```
 
@@ -104,11 +106,20 @@ At minimum, fill in:
 DATABASE_URL=postgresql+psycopg2://pathoryx_user:your_strong_password_here@localhost:5432/pathoryx
 ```
 
-All other values are optional for initial testing (PASNET, LIS, Nexus can stay as `CHANGE_ME`).
+The `.env.windows.example` template already points config paths to the
+`.windows.yaml` variants (`babelshark_config.windows.yaml`, etc.) which
+contain correct Windows data paths. All other values are optional for initial
+testing (PASNET, LIS, Nexus can stay as `CHANGE_ME`).
 
 ---
 
 ## 7. Run database migrations
+
+```powershell
+.\scripts\windows_run_migrations.ps1
+```
+
+Or directly:
 
 ```powershell
 alembic upgrade head
@@ -117,16 +128,22 @@ alembic upgrade head
 Verify the schema was created:
 
 ```sql
-\dn   -- should show schemas: core, babelshark, qc, dicomizer, uploader, failed_watcher
+\dn   -- should show schemas: core, babelshark, qc, dicomizer, uploader, failed_watcher, upload_tracking
 \dt core.*
+\dt upload_tracking.*
 ```
 
 ---
 
 ## 8. Create runtime data folders
 
-The `data\` directory is pre-populated with `.gitkeep` placeholder files.
-The folders are already present after cloning — no extra action needed.
+Run the bootstrap script to create all required directories:
+
+```powershell
+.\scripts\windows_bootstrap_dirs.ps1
+```
+
+The script is idempotent — safe to re-run if directories already exist.
 
 To verify:
 
@@ -136,17 +153,43 @@ dir C:\Users\Public\projects\Palantir\data\
 
 Expected folders: `watch`, `scanner_fake`, `staging`, `final`, `failed`, `suspicious`,
 `manual_review`, `dicom_output`, `run_output`, `labels`, `label_crops`, `roi_debug`,
-`roi_debug_parts`, `logs`, `upload_test`, `caseid_test`, `qc_output`, `quarantine`
+`roi_debug_parts`, `logs`, `qc_output`, `quarantine`
 
 ---
 
-## 9. Start the full pipeline (orchestrator)
+## 9. Run the smoke test
+
+Before starting services, verify the installation:
+
+```powershell
+.\scripts\windows_smoke_test.ps1
+```
+
+The smoke test checks:
+- `.env` loaded and `DATABASE_URL` configured
+- All config files exist at their configured paths
+- All data directories present
+- Model weights present
+- Python package importable, entry points registered
+- Database connection succeeds
+- `alembic current` shows `(head)`
+- `upload_tracking.estimated_upload_queue` table exists
+- Scanner fleet YAML parses correctly
+- DICOM upload is in dry-run mode (safe default)
+
+All checks must pass before continuing.
+
+---
+
+## 10. Start the full pipeline (orchestrator)
 
 The orchestrator starts all services in the correct order:
 
 ```powershell
-pathoryx-orchestrate
+.\scripts\windows_start_orchestrator.ps1
 ```
+
+Or directly: `pathoryx-orchestrate`
 
 Or start services individually in separate PowerShell windows:
 
@@ -167,26 +210,28 @@ pathoryx-uploader
 pathoryx-recovery-sentry
 
 # Terminal 6 — Dashboard backend
-pathoryx-dashboard
+.\scripts\windows_start_dashboard_backend.ps1
 ```
 
 ---
 
-## 10. Start the dashboard frontend
+## 11. Start the dashboard frontend
 
 ```powershell
-cd C:\Users\Public\projects\Palantir\dashboard-ui
-npm install
-npm run dev
+.\scripts\windows_start_dashboard_frontend.ps1
 ```
 
 Open in browser: http://localhost:5173
 
-Or use the built version (served by the FastAPI backend): http://127.0.0.1:8090
+Or build and serve via the FastAPI backend:
+```powershell
+cd dashboard-ui && npm run build
+```
+Then access at: http://127.0.0.1:8090
 
 ---
 
-## 11. Drop test slides into the watch folder
+## 12. Drop test slides into the watch folder
 
 Copy any `.svs`, `.ndpi`, `.tiff`, or other supported WSI file into:
 
@@ -198,7 +243,7 @@ BabelShark will detect and process it within 1 minute (configured in `watch_inte
 
 ---
 
-## 12. Monitor the pipeline
+## 13. Monitor the pipeline
 
 ### Dashboard
 

@@ -374,11 +374,14 @@ def get_scanner_summary(session: Session, fleet: "ScannerFleet") -> list[dict]:
         if entry is not None and not entry.enabled and c["total"] == 0:
             continue
         result.append({
-            "scanner_id":   sid,
-            "display_name": fleet.display_name(sid),
-            "location":     entry.location  if entry else "",
-            "vendor":       entry.vendor    if entry else "unknown",
-            "enabled":      entry.enabled   if entry else True,
+            "scanner_id":    sid,
+            "display_name":  fleet.display_name(sid),
+            "location":      entry.location       if entry else "",
+            "vendor":        entry.vendor         if entry else "unknown",
+            "model":         entry.model          if entry else "",
+            "serial_number": entry.serial_number  if entry else "",
+            "aliases":       list(entry.aliases)  if entry else [],
+            "enabled":       entry.enabled        if entry else True,
             **c,
         })
 

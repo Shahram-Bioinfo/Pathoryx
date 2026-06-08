@@ -113,6 +113,49 @@ class TestScannerFleetLoad:
         assert fleet.display_name("scanner-02") == "resolute"
         assert fleet.display_name("scanner-03") == "stardestroyer"
 
+    def test_loads_real_fleet_config(self, tmp_path):
+        """Smoke-test the real scanner_fleet.yaml format with serial numbers and aliases."""
+        path = _write_yaml(tmp_path, {
+            "scanners": [
+                {"scanner_id": "M40010", "serial_number": "M40010",
+                 "display_name": "Resolute", "location": "lab-main",
+                 "vendor": "Leica Biosystems", "model": "Aperio GT450",
+                 "aliases": ["scanner-02"], "enabled": True},
+                {"scanner_id": "M40023", "serial_number": "M40023",
+                 "display_name": "HomeOne", "location": "lab-secondary",
+                 "vendor": "Leica Biosystems", "model": "Aperio GT450",
+                 "aliases": ["scanner-01"], "enabled": True},
+                {"scanner_id": "SS12620R", "serial_number": "SS12620R",
+                 "display_name": "StarDestroyer Devastator", "location": "lab-main",
+                 "vendor": "Leica Biosystems", "model": "Aperio GT450 RUO",
+                 "aliases": ["scanner-03"], "enabled": True},
+            ]
+        })
+        fleet = ScannerFleet.load(path)
+        assert fleet.total_count == 3
+        assert fleet.display_name("M40010") == "Resolute"
+        assert fleet.display_name("M40023") == "HomeOne"
+        assert fleet.display_name("SS12620R") == "StarDestroyer Devastator"
+        # Verify metadata fields
+        entry = fleet.get("M40010")
+        assert entry is not None
+        assert entry.serial_number == "M40010"
+        assert entry.model == "Aperio GT450"
+        assert entry.vendor == "Leica Biosystems"
+        assert entry.aliases == ("scanner-02",)
+
+    def test_empty_aliases_list_loads_cleanly(self, tmp_path):
+        path = _write_yaml(tmp_path, {
+            "scanners": [
+                {"scanner_id": "M40015", "display_name": "Avenger",
+                 "aliases": [], "enabled": True},
+            ]
+        })
+        fleet = ScannerFleet.load(path)
+        entry = fleet.get("M40015")
+        assert entry is not None
+        assert entry.aliases == ()
+
 
 # ---------------------------------------------------------------------------
 # Name resolution
@@ -161,6 +204,73 @@ class TestScannerNameResolution:
 
 
 # ---------------------------------------------------------------------------
+# Alias resolution
+# ---------------------------------------------------------------------------
+
+class TestScannerAliasResolution:
+    @pytest.fixture
+    def fleet_with_aliases(self):
+        return ScannerFleet([
+            ScannerEntry(
+                scanner_id="M40010", display_name="Resolute",
+                serial_number="M40010", model="Aperio GT450",
+                vendor="Leica Biosystems", aliases=("scanner-02",),
+            ),
+            ScannerEntry(
+                scanner_id="M40023", display_name="HomeOne",
+                serial_number="M40023", model="Aperio GT450",
+                vendor="Leica Biosystems", aliases=("scanner-01",),
+            ),
+            ScannerEntry(
+                scanner_id="SS12620R", display_name="StarDestroyer Devastator",
+                serial_number="SS12620R", model="Aperio GT450 RUO",
+                vendor="Leica Biosystems", aliases=("scanner-03",),
+            ),
+        ])
+
+    def test_primary_id_resolves(self, fleet_with_aliases):
+        assert fleet_with_aliases.display_name("M40010") == "Resolute"
+        assert fleet_with_aliases.display_name("M40023") == "HomeOne"
+        assert fleet_with_aliases.display_name("SS12620R") == "StarDestroyer Devastator"
+
+    def test_alias_resolves_to_same_display_name(self, fleet_with_aliases):
+        assert fleet_with_aliases.display_name("scanner-02") == "Resolute"
+        assert fleet_with_aliases.display_name("scanner-01") == "HomeOne"
+        assert fleet_with_aliases.display_name("scanner-03") == "StarDestroyer Devastator"
+
+    def test_alias_get_returns_canonical_entry(self, fleet_with_aliases):
+        entry = fleet_with_aliases.get("scanner-01")
+        assert entry is not None
+        assert entry.scanner_id == "M40023"
+        assert entry.display_name == "HomeOne"
+
+    def test_is_known_true_for_alias(self, fleet_with_aliases):
+        assert fleet_with_aliases.is_known("scanner-01") is True
+        assert fleet_with_aliases.is_known("scanner-02") is True
+
+    def test_alias_does_not_inflate_total_count(self, fleet_with_aliases):
+        assert fleet_with_aliases.total_count == 3
+
+    def test_all_returns_canonical_entries_only(self, fleet_with_aliases):
+        ids = [e.scanner_id for e in fleet_with_aliases.all()]
+        assert ids == ["M40010", "M40023", "SS12620R"]
+
+    def test_unknown_alias_falls_back_to_raw_id(self, fleet_with_aliases):
+        assert fleet_with_aliases.display_name("scanner-99") == "scanner-99"
+
+    def test_multiple_aliases_all_resolve(self):
+        fleet = ScannerFleet([
+            ScannerEntry(
+                scanner_id="M40015", display_name="Avenger",
+                aliases=("old-id-1", "old-id-2"),
+            )
+        ])
+        assert fleet.display_name("old-id-1") == "Avenger"
+        assert fleet.display_name("old-id-2") == "Avenger"
+        assert fleet.total_count == 1
+
+
+# ---------------------------------------------------------------------------
 # Enabled / disabled filtering
 # ---------------------------------------------------------------------------
 
@@ -206,6 +316,9 @@ class TestScannerEntry:
         entry = ScannerEntry(scanner_id="sc-01", display_name="homeone")
         assert entry.location == ""
         assert entry.vendor == "unknown"
+        assert entry.model == ""
+        assert entry.serial_number == ""
+        assert entry.aliases == ()
         assert entry.enabled is True
 
     def test_frozen_immutable(self):

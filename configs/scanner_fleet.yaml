@@ -5,34 +5,66 @@
 # Maps operational scanner_id values (as recorded in the pipeline database)
 # to human-readable display names for the dashboard.
 #
-# scanner_id:   The ID string stored in FileRecord, upload_results, and
-#               upload_tracking.estimated_upload_queue. Must match exactly.
-# display_name: Short operational name shown in the dashboard UI.
-# location:     Physical location label (shown in tooltips and details).
-# vendor:       Scanner manufacturer (informational).
-# enabled:      true = scanner visible in filter dropdowns.
-#               false = scanner hidden from filters but still visible if it
-#                       has active pipeline data (data always wins over config).
+# scanner_id:    The canonical ID stored in FileRecord, upload_results, and
+#                upload_tracking.estimated_upload_queue. Must match exactly.
+# serial_number: Physical instrument serial number (informational; matches
+#                scanner_id for Aperio scanners).
+# display_name:  Short operational name shown in the dashboard UI.
+# location:      Physical location label (shown in tooltips and details).
+# vendor:        Scanner manufacturer (informational).
+# model:         Scanner model name (informational).
+# aliases:       Legacy or alternate IDs that resolve to this scanner.
+#                Useful for backward compatibility when scanner IDs change.
+# enabled:       true = scanner visible in filter dropdowns.
+#                false = scanner hidden from filters but still visible if it
+#                        has active pipeline data (data always wins over config).
 #
 # Reload requires a dashboard service restart. Unknown scanner IDs
 # (not listed here) fall back to displaying the raw scanner_id.
 # =============================================================================
 
 scanners:
-  - scanner_id:    scanner-01
-    display_name:  homeone
+  - scanner_id:    M40010
+    serial_number: M40010
+    display_name:  Resolute
     location:      lab-main
-    vendor:        unknown
+    vendor:        Leica Biosystems
+    model:         Aperio GT450
+    aliases:       [scanner-02]
     enabled:       true
 
-  - scanner_id:    scanner-02
-    display_name:  resolute
+  - scanner_id:    M40015
+    serial_number: M40015
+    display_name:  Avenger
     location:      lab-main
-    vendor:        unknown
+    vendor:        Leica Biosystems
+    model:         Aperio GT450
+    aliases:       []
     enabled:       true
 
-  - scanner_id:    scanner-03
-    display_name:  stardestroyer
+  - scanner_id:    M40023
+    serial_number: M40023
+    display_name:  HomeOne
+    location:      lab-secondary
+    vendor:        Leica Biosystems
+    model:         Aperio GT450
+    aliases:       [scanner-01]
+    enabled:       true
+
+  - scanner_id:    M40024
+    serial_number: M40024
+    display_name:  Chimera
+    location:      lab-secondary
+    vendor:        Leica Biosystems
+    model:         Aperio GT450
+    aliases:       []
+    enabled:       true
+
+  - scanner_id:    SS12620R
+    serial_number: SS12620R
+    display_name:  StarDestroyer Devastator
     location:      lab-main
-    vendor:        unknown
+    vendor:        Leica Biosystems
+    model:         Aperio GT450 RUO
+    aliases:       [scanner-03]
     enabled:       true

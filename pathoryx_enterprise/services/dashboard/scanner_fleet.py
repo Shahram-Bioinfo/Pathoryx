@@ -39,6 +39,9 @@ class ScannerEntry:
     display_name: str
     location: str = ""
     vendor: str = "unknown"
+    model: str = ""
+    serial_number: str = ""
+    aliases: tuple[str, ...] = ()
     enabled: bool = True
 
 
@@ -59,8 +62,12 @@ class ScannerFleet:
     """
 
     def __init__(self, entries: list[ScannerEntry]) -> None:
-        self._by_id: dict[str, ScannerEntry] = {e.scanner_id: e for e in entries}
         self._entries: list[ScannerEntry] = list(entries)
+        self._by_id: dict[str, ScannerEntry] = {}
+        for e in entries:
+            self._by_id[e.scanner_id] = e
+            for alias in e.aliases:
+                self._by_id[alias] = e
 
     # ── Name resolution ──────────────────────────────────────────────────────
 
@@ -122,6 +129,9 @@ class ScannerFleet:
                     display_name=str(item.get("display_name") or sid),
                     location=str(item.get("location") or ""),
                     vendor=str(item.get("vendor") or "unknown"),
+                    model=str(item.get("model") or ""),
+                    serial_number=str(item.get("serial_number") or ""),
+                    aliases=tuple(str(a) for a in (item.get("aliases") or [])),
                     enabled=bool(item.get("enabled", True)),
                 ))
             except (KeyError, TypeError) as exc:

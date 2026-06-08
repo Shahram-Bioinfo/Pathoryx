@@ -1,11 +1,13 @@
 # =============================================================================
-# Pathoryx — QC Inference Configuration
-# Windows Test Environment
+# Palantir — QC Inference Configuration
+# Windows Production Environment
+#
+# Copy this file to configs\qc_config.yaml (or set QC_CONFIG_PATH in .env).
 # =============================================================================
 
 paths:
-  output_root: "./models_weights/data/qc_output"
-  quarantine_root: "C:/Users/Public/projects/Pathoryx/data/quarantine"
+  output_root: "C:/Users/Public/projects/Palantir/data/qc_output"
+  quarantine_root: "C:/Users/Public/projects/Palantir/data/quarantine"
 
 pipeline:
   pipeline_name: slide_qc_service
@@ -13,7 +15,7 @@ pipeline:
 
 watcher:
   input_dirs:
-    - data/watch"
+    - "C:/Users/Public/projects/Palantir/data/watch"
   poll_interval_seconds: 10
   recursive: true
   stable_file_wait_seconds: 20
@@ -25,11 +27,11 @@ watcher:
     - ".mrxs"
     - ".vms"
 
-
-  penmark_weights: "./models_weights/penmark_detection_MobileNetV3.pth"
-  bubble_weights: "./models_weights/bubble_detection_ConvNeXtTiny_model.pth"
-  stain_weights: "./models_weights/stain_model_MobileNetV3.pth"
-  blur_weights: "./models_weights/blur_detection_resnet18_old.pth"
+models:
+  penmark_weights: "C:/Users/Public/projects/Palantir/models_weights/penmark_detection_MobileNetV3.pth"
+  bubble_weights: "C:/Users/Public/projects/Palantir/models_weights/bubble_detection_ConvNeXtTiny_model.pth"
+  stain_weights: "C:/Users/Public/projects/Palantir/models_weights/stain_model_MobileNetV3.pth"
+  blur_weights: "C:/Users/Public/projects/Palantir/models_weights/blur_detection_resnet18_old.pth"
 
 modules:
   enable_stain: true

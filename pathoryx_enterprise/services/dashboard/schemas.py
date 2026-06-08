@@ -789,6 +789,9 @@ class ScannerConfig(BaseModel):
     display_name: str
     location: str = ""
     vendor: str = "unknown"
+    model: str = ""
+    serial_number: str = ""
+    aliases: list[str] = []
     enabled: bool = True
 
 
@@ -803,6 +806,9 @@ class ScannerSummaryItem(BaseModel):
     display_name: str
     location: str = ""
     vendor: str = "unknown"
+    model: str = ""
+    serial_number: str = ""
+    aliases: list[str] = []
     enabled: bool = True
     queued: int = 0
     active: int = 0

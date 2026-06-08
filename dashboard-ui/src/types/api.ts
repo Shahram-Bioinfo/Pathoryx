@@ -671,6 +671,9 @@ export interface ScannerConfig {
   display_name: string
   location: string
   vendor: string
+  model: string
+  serial_number: string
+  aliases: string[]
   enabled: boolean
 }
 
@@ -685,6 +688,9 @@ export interface ScannerSummaryItem {
   display_name: string
   location: string
   vendor: string
+  model: string
+  serial_number: string
+  aliases: string[]
   enabled: boolean
   queued: number
   active: number
