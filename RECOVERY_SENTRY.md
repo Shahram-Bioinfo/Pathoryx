@@ -1,13 +1,13 @@
 # RecoverySentry
 
-RecoverySentry monitors `failed/`, `suspicious/`, and `manual_review/` folders for technician-corrected WSI files and auto-recovers valid slides back into the normal Pathoryx pipeline.
+RecoverySentry monitors `failed/`, `suspicious/`, and `manual_review/` folders for technician-corrected WSI files and auto-recovers valid slides back into the normal Palantir pipeline.
 
 ## What it does
 
 When a technician renames, replaces, or adds a corrected file into a watched folder, RecoverySentry:
 
 1. Detects the change (filesystem snapshot diff + watchdog-style poll)
-2. Validates the filename matches the Pathoryx SlideID format
+2. Validates the filename matches the Palantir SlideID format
 3. Extracts the scan timestamp from WSI metadata (if not already in the filename)
 4. Moves the file to `final/<CaseID>/` atomically
 5. Updates `core.file_records` and sets status to `qc_pending`

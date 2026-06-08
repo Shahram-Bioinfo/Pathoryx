@@ -1,8 +1,8 @@
-# Pathoryx Enterprise — Architecture
+# Palantir Enterprise — Architecture
 
 ## Overview
 
-Pathoryx Enterprise is a production-grade WSI (Whole Slide Image) ingestion and processing pipeline.
+Palantir Enterprise is a production-grade WSI (Whole Slide Image) ingestion and processing pipeline.
 It processes 500–1000 slides per day across four main stages: intake (BabelShark), QC inference,
 DICOM conversion, and PACS upload. All inter-service communication goes through PostgreSQL.
 

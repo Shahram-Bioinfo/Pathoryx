@@ -83,7 +83,7 @@ def traced_stage(
     """
     Context manager that wraps a pipeline stage in an OTel span.
 
-    Injects standard Pathoryx attributes so every span is searchable by
+    Injects standard Palantir attributes so every span is searchable by
     correlation_id, artifact, and run.
     """
     try:

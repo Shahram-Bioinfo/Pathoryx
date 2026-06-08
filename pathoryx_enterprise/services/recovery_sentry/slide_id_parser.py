@@ -1,7 +1,7 @@
 """
 SlideID parser for RecoverySentry.
 
-Validates and parses the standard Pathoryx slide filename format:
+Validates and parses the standard Palantir slide filename format:
   <CaseID><Pot>-<Block>-<Section>-<Stain>[_UTC<timestamp>].<ext>
 
 Examples:

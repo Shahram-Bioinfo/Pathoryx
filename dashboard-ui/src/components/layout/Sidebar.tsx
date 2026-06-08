@@ -47,7 +47,7 @@ export function Sidebar() {
             className="block text-sm font-semibold"
             style={{ letterSpacing: '0.10em', color: 'var(--text-primary)' }}
           >
-            PATHORYX
+            PALANTIR
           </span>
           <span
             className="block mt-0.5 text-[9px]"

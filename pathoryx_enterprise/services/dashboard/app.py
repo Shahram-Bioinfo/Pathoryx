@@ -1,5 +1,5 @@
 """
-FastAPI application for the Pathoryx Dashboard.
+FastAPI application for the Palantir Dashboard.
 
 All endpoints are read-only. Each endpoint degrades gracefully on DB errors
 (returns empty/zero data with HTTP 200) so the dashboard stays up even when
@@ -359,8 +359,8 @@ def _label_cache_dir(cfg: dict) -> Path:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Pathoryx Dashboard API",
-        description="Read-only observability API for the Pathoryx Enterprise pipeline.",
+        title="Palantir Dashboard API",
+        description="Read-only observability API for the Palantir Enterprise pipeline.",
         version="1.0.0",
         docs_url="/dashboard/docs",
         redoc_url="/dashboard/redoc",
@@ -922,7 +922,7 @@ def create_app() -> FastAPI:
     )
     def validate_filename(body: FilenameValidationRequest) -> FilenameValidationResponse:
         """
-        Validate a proposed filename against the Pathoryx slide ID rules.
+        Validate a proposed filename against the Palantir slide ID rules.
 
         Safe to call on every keystroke — no filesystem or DB side-effects.
         Returns structured components and any stain-canonical normalized form.

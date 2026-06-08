@@ -12,11 +12,11 @@ the circuit opens and uploads pause for `reset_seconds` before retrying.
 from __future__ import annotations
 
 import os
-import shutil
 import time
 from pathlib import Path
 
 import structlog
+from sqlalchemy import select
 
 from pathoryx_enterprise.db.models.core import ServiceTrigger
 from pathoryx_enterprise.db.repositories.runner_registry import RunnerRegistryRepository
@@ -183,17 +183,56 @@ def run(settings: UploaderSettings) -> None:
             service_name=SERVICE_NAME,
         )
 
+        # Write "uploading" status to dashboard queue before starting work.
+        # Wrapped in its own try/except — dashboard sync failures must not abort the pipeline.
         try:
-            with traced_stage(
-                tracer,
-                "upload.finalize",
-                correlation_id=trigger.correlation_id,
-                global_artifact_id=trigger.global_artifact_id,
-            ):
-                result = _do_upload(trigger)
-
             with get_session() as session:
-                from sqlalchemy import select
+                t_for_start = session.execute(
+                    select(ServiceTrigger).where(
+                        ServiceTrigger.internal_id == trigger.internal_id
+                    )
+                ).scalar_one_or_none()
+                if t_for_start:
+                    UploaderDBWriter(session).record_upload_started(
+                        trigger=t_for_start,
+                        host_id=host_id,
+                    )
+        except Exception:
+            logger.warning(
+                "failed to write upload started status",
+                trigger_id=trigger.internal_id,
+            )
+
+        # Retry loop: attempt up to max_retries times with exponential back-off.
+        last_exc: Exception | None = None
+        upload_result: dict | None = None
+
+        for attempt in range(settings.max_retries):
+            try:
+                with traced_stage(
+                    tracer,
+                    "upload.finalize",
+                    correlation_id=trigger.correlation_id,
+                    global_artifact_id=trigger.global_artifact_id,
+                ):
+                    upload_result = _do_upload(trigger)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "upload attempt failed",
+                    attempt=attempt + 1,
+                    max_retries=settings.max_retries,
+                    trigger_id=trigger.internal_id,
+                    error=str(exc),
+                )
+                if attempt < settings.max_retries - 1 and not coordinator.is_stopping:
+                    backoff = min(5 * (2 ** attempt), 60)
+                    _sleep_interruptible(backoff, coordinator)
+
+        if last_exc is None and upload_result is not None:
+            with get_session() as session:
                 t_fresh = session.execute(
                     select(ServiceTrigger).where(
                         ServiceTrigger.internal_id == trigger.internal_id
@@ -206,23 +245,22 @@ def run(settings: UploaderSettings) -> None:
                     runner_id=runner_id,
                     host_id=host_id,
                     service_version=settings.service_version,
-                    **result,
+                    retry_count=0,
+                    **upload_result,
                 )
-
             circuit.record_success()
             consecutive_errors = 0
-
-        except Exception as exc:
+        else:
             consecutive_errors += 1
             circuit.record_failure()
-            logger.exception(
-                "upload failed",
+            logger.error(
+                "upload failed after all retries",
+                attempts=settings.max_retries,
                 trigger_id=trigger.internal_id,
-                error=str(exc),
+                error=str(last_exc),
             )
             try:
                 with get_session() as session:
-                    from sqlalchemy import select
                     t_fresh = session.execute(
                         select(ServiceTrigger).where(
                             ServiceTrigger.internal_id == trigger.internal_id
@@ -231,7 +269,8 @@ def run(settings: UploaderSettings) -> None:
                     if t_fresh:
                         UploaderDBWriter(session).record_upload_failure(
                             trigger=t_fresh,
-                            error=str(exc),
+                            error=str(last_exc) if last_exc else "unknown",
+                            retry_count=settings.max_retries,
                             runner_id=runner_id,
                             host_id=host_id,
                             service_version=settings.service_version,

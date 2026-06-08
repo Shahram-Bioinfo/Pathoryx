@@ -672,7 +672,7 @@ def _run_script_subprocess(
     cmd += ["--log-level", log_level]
 
     env = os.environ.copy()
-    repo_root = Path(__file__).resolve().parents[4]  # Pathoryx-Enterprise root
+    repo_root = Path(__file__).resolve().parents[4]  # Palantir root
     src_root = repo_root / "src"
     old_pp = env.get("PYTHONPATH", "").strip()
     env["PYTHONPATH"] = f"{src_root}:{old_pp}" if old_pp else str(src_root)

@@ -1,5 +1,5 @@
 # =============================================================================
-# Pathoryx — QC Service Routing & Scanner Policy Configuration
+# Palantir — QC Service Routing & Scanner Policy Configuration
 # Windows Test Environment
 # Loaded via env var: QC_SERVICE_CONFIG
 #
@@ -68,22 +68,22 @@ scanner_policies:
     qc_position: post_babelshark
     trust_scanner_qc: false
     file_routing: copy
-    passed_output_dir: "C:/Users/Public/projects/Pathoryx/data/watch"
-    failed_output_dir: "C:/Users/Public/projects/Pathoryx/data/failed"
-    quarantine_dir: "C:/Users/Public/projects/Pathoryx/data/quarantine"
+    passed_output_dir: "C:/Users/Public/projects/Palantir/data/watch"
+    failed_output_dir: "C:/Users/Public/projects/Palantir/data/failed"
+    quarantine_dir: "C:/Users/Public/projects/Palantir/data/quarantine"
     next_service: dicom_service
     next_stage: dicom
 
   # ── Example: scanner feeding into BabelShark watch folder ────────────────
   # Uncomment and set input_dir to your scanner's network share path.
   # - scanner_id: scanner_fake
-  #   input_dir: "C:/Users/Public/projects/Pathoryx/data/scanner_fake"
+  #   input_dir: "C:/Users/Public/projects/Palantir/data/scanner_fake"
   #   pathoryx_qc_enabled: true
   #   qc_position: pre_babelshark
   #   trust_scanner_qc: false
   #   file_routing: copy
-  #   passed_output_dir: "C:/Users/Public/projects/Pathoryx/data/watch"
-  #   failed_output_dir: "C:/Users/Public/projects/Pathoryx/data/failed"
-  #   quarantine_dir: "C:/Users/Public/projects/Pathoryx/data/quarantine"
+  #   passed_output_dir: "C:/Users/Public/projects/Palantir/data/watch"
+  #   failed_output_dir: "C:/Users/Public/projects/Palantir/data/failed"
+  #   quarantine_dir: "C:/Users/Public/projects/Palantir/data/quarantine"
   #   next_service: null
   #   next_stage: null

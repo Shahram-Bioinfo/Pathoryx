@@ -75,7 +75,7 @@ def validate_filename_structured(
     config_requires_timestamp: bool = False,
 ) -> dict:
     """
-    Validate *filename* against the Pathoryx slide ID rules.
+    Validate *filename* against the Palantir slide ID rules.
 
     Delegates to FilenameValidator — safe to call on every keystroke.
     Does NOT touch the filesystem or DB.
@@ -262,7 +262,7 @@ def execute_technician_rename(
     parsed = parse_slide_id(proposed_filename)
     if parsed is None:
         raise ActionError(
-            f"'{proposed_filename}' does not match the Pathoryx slide ID pattern "
+            f"'{proposed_filename}' does not match the Palantir slide ID pattern "
             "(expected e.g. N2024002863SA-1-1-H&E.svs or N2024002863SA-1-1-H&E_UTC2024-08-22T08_36_39Z.svs)"
         )
 

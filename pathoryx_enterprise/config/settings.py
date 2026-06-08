@@ -1,5 +1,5 @@
 """
-Central configuration for Pathoryx Enterprise.
+Central configuration for Palantir Enterprise.
 
 All settings are resolved from environment variables (or a .env file).
 No hardcoded credentials or paths anywhere in this file.

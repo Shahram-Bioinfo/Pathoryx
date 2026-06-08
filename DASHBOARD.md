@@ -1,6 +1,6 @@
-# Pathoryx Dashboard
+# Palantir Dashboard
 
-Enterprise operations dashboard for the Pathoryx WSI pipeline.
+Enterprise operations dashboard for the Palantir WSI pipeline.
 
 - **Phase 1** — Read-only FastAPI backend API (port 8090)
 - **Phase 2** — React + TypeScript + TailwindCSS frontend (port 5173 dev / served as static in prod)

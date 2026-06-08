@@ -315,7 +315,7 @@ class FilenameValidator:
         else:
             errors.append(ValidationIssue(
                 "unrecognized",
-                "Filename does not match the Pathoryx slide ID format. "
+                "Filename does not match the Palantir slide ID format. "
                 "Required: N<10-digit case ID><POT>-<BLOCK>-<SECTION>-<STAIN>"
                 "[_UTC<timestamp>].<ext>  (e.g. N2024002863SA-1-1-H&E.svs)",
             ))

@@ -1,5 +1,5 @@
 """
-Unit tests for the Pathoryx Dashboard API.
+Unit tests for the Palantir Dashboard API.
 
 All DB interactions are mocked so no real database is required.
 Tests verify: HTTP status codes, response shape, and graceful degradation

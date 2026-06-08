@@ -1,16 +1,16 @@
-# Migration Plan — Pathoryx → Pathoryx Enterprise
+# Migration Plan — Palantir → Palantir Enterprise
 
 ## Prerequisites
 
 1. **Postgres 14+** with the `pathoryx` database created.
 2. Application DB user with CREATE SCHEMA privileges (migration only).
 3. `.env` file populated from `.env.example`.
-4. Original Pathoryx services **stopped** before migration begins.
+4. Original Palantir services **stopped** before migration begins.
 
 ## Step 1 — Install Enterprise Package
 
 ```bash
-cd /home/shahram/Pathoryx-Enterprise
+cd /home/shahram/Palantir
 pip install -e .
 ```
 
@@ -31,7 +31,7 @@ psql "$DATABASE_URL" -c "\dn"   # should show core, events, qc, babelshark, dico
 
 ## Step 3 — Backfill Existing Data (Optional)
 
-If you have existing data in the original Pathoryx DB, write a one-off migration script:
+If you have existing data in the original Palantir DB, write a one-off migration script:
 
 ```python
 # scripts/backfill.py (not included — write per your data)
@@ -90,7 +90,7 @@ All should return `{"healthy": true, ...}`.
 
 If anything goes wrong:
 1. Stop all enterprise services.
-2. The original Pathoryx project is **untouched** — restart original services.
+2. The original Palantir project is **untouched** — restart original services.
 3. Drop the enterprise schemas (`DROP SCHEMA core CASCADE; ...`) if needed.
 
 ## Data Coexistence Note

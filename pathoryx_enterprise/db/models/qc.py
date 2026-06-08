@@ -75,7 +75,7 @@ class QCResult(Base, TimestampMixin):
 
     # Policy decisions recorded for this run
     trust_scanner_qc: Mapped[Optional[bool]] = mapped_column()      # scanner internal QC trusted?
-    pathoryx_qc_required: Mapped[Optional[bool]] = mapped_column()  # Pathoryx QC required by policy?
+    pathoryx_qc_required: Mapped[Optional[bool]] = mapped_column()  # Palantir QC required by policy?
     qc_skip_reason: Mapped[Optional[str]] = mapped_column(Text)     # why QC was skipped
 
     # Downstream routing at write time

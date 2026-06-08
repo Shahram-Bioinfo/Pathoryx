@@ -1,6 +1,6 @@
 # Operations Runbook
 
-Day-to-day operational procedures for running and maintaining the Pathoryx pipeline.
+Day-to-day operational procedures for running and maintaining the Palantir pipeline.
 
 ---
 
@@ -341,7 +341,7 @@ If `idle` connections are near `max_connections`, increase `DB_MAX_OVERFLOW` or 
 
 ```bash
 # 1. Deploy new code
-cd /home/shahram/Pathoryx-Enterprise
+cd /home/shahram/Palantir
 git pull  # or copy new files
 
 # 2. Reinstall

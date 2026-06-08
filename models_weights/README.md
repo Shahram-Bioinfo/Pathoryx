@@ -14,7 +14,7 @@ These files are not tracked by git due to their size (up to 107 MB each).
 ## How to obtain
 
 Copy these files from the shared network drive or model registry to this folder,
-or contact the Pathoryx project maintainer for access.
+or contact the Palantir project maintainer for access.
 
 To use Git LFS (recommended for teams):
 ```bash

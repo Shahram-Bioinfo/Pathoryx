@@ -1,5 +1,5 @@
 """
-Canonical database contract for Pathoryx Enterprise.
+Canonical database contract for Palantir Enterprise.
 
 This file is the single authoritative declaration of every table managed by
 this system. Services validate against this contract at startup to catch

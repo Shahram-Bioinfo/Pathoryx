@@ -1,5 +1,5 @@
 """
-Pathoryx Dashboard service entrypoint.
+Palantir Dashboard service entrypoint.
 
 Usage:
     pathoryx-dashboard            # reads config from environment / .env

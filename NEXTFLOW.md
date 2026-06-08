@@ -1,6 +1,6 @@
 # Nextflow Pipeline Guide
 
-Nextflow is an optional orchestration layer that wraps the Pathoryx Python services as isolated pipeline stages. It adds resume capability, cluster dispatch, and reproducibility tracking on top of the database-first architecture.
+Nextflow is an optional orchestration layer that wraps the Palantir Python services as isolated pipeline stages. It adds resume capability, cluster dispatch, and reproducibility tracking on top of the database-first architecture.
 
 When to use Nextflow vs the orchestrator:
 
@@ -17,7 +17,7 @@ When to use Nextflow vs the orchestrator:
 ## Quick start
 
 ```bash
-cd /home/shahram/Pathoryx-Enterprise/nextflow
+cd /home/shahram/Palantir/nextflow
 
 # Run on local machine with a manifest of slides:
 nextflow run main.nf \

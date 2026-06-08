@@ -57,7 +57,7 @@ importlib.import_module("utils.wsidicom_utils")           # tool_WSIDicomizer/ut
 from pipeline.config import load_config
 from pipeline.services.conversion_service import ConversionService
 from pipeline.services.upload_service import UploadService  # imported but discarded (assigned to _)
-# Required in PYTHONPATH: /home/shahram/Pathoryx/services/dicom_delivery_adapter
+# Required in PYTHONPATH: /home/shahram/Palantir/services/dicom_delivery_adapter
 ```
 
 **Key observations:**

@@ -11,12 +11,15 @@ Handles:
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from pathoryx_enterprise.db.models.core import FileRecord, ServiceTrigger
 from pathoryx_enterprise.db.models.dicomizer import ConversionResult
+from pathoryx_enterprise.db.models.upload_tracking import EstimatedUploadQueue
 from pathoryx_enterprise.db.repositories.event_store import EventStoreRepository
 from pathoryx_enterprise.db.repositories.file_record import FileRecordRepository
 from pathoryx_enterprise.db.repositories.trigger import TriggerRepository
@@ -143,7 +146,7 @@ class DICOMDBWriter:
 
         # 4. Enqueue upload_service trigger (unconditional — no FileRecord required)
         #    Payload gives upload_service everything it needs to run storescu.
-        self._trigger_repo.enqueue(
+        upload_trigger, _ = self._trigger_repo.enqueue(
             source_service=SERVICE_NAME,
             target_service="upload_service",
             stage_name="upload",
@@ -157,6 +160,15 @@ class DICOMDBWriter:
                 "global_artifact_id": artifact_id,
                 "scanner_id": scanner_id,
             },
+        )
+
+        # 4b. Pre-populate upload queue row so the dashboard shows this file as "queued"
+        #     immediately after DICOM conversion, before the uploader picks it up.
+        self._init_upload_queue_row(
+            upload_trigger=upload_trigger,
+            file_record=record,
+            scanner_id=scanner_id,
+            file_size=input_file_size,
         )
 
         # 5. Event
@@ -186,6 +198,42 @@ class DICOMDBWriter:
         events_appended_total.labels(
             event_type="file.dicom_converted", service=SERVICE_NAME
         ).inc()
+
+    def _init_upload_queue_row(
+        self,
+        *,
+        upload_trigger: ServiceTrigger,
+        file_record: FileRecord | None,
+        scanner_id: str | None,
+        file_size: int | None,
+    ) -> None:
+        """Insert a 'queued' row into estimated_upload_queue on upload trigger dispatch."""
+        if file_record is None:
+            return
+        filename = file_record.current_filename or file_record.original_filename or ""
+        if not filename:
+            return
+
+        queued_at = upload_trigger.triggered_at or utc_now()
+        now = utc_now()
+        stmt = (
+            pg_insert(EstimatedUploadQueue)
+            .values(
+                filename=filename,
+                scanner_id=scanner_id or file_record.scanner_id,
+                queued_at=queued_at,
+                estimated_upload_at=queued_at + timedelta(minutes=10),
+                upload_status="queued",
+                file_size_bytes=file_size or file_record.file_size,
+                last_updated_at=now,
+            )
+            .on_conflict_do_nothing(constraint="uq_euq_filename_queued_at")
+        )
+        try:
+            self._session.execute(stmt)
+            self._session.flush()
+        except Exception:
+            logger.warning("failed to init upload queue row", exc_info=True)
 
     def record_conversion_failure(
         self,

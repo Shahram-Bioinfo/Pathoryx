@@ -1,5 +1,5 @@
 # ============================================================
-# Pathoryx — BabelShark Runtime Configuration
+# Palantir — BabelShark Runtime Configuration
 # Windows Test Environment
 # ============================================================
 
@@ -34,21 +34,21 @@ wsi_types:
   - ".jpg"
   - ".jpeg"
 
-watch_dir: "C:/Users/Public/projects/Pathoryx/data/watch"
-staging_dir: "C:/Users/Public/projects/Pathoryx/data/staging"
-failed_output_dir: "C:/Users/Public/projects/Pathoryx/data/failed"
-suspicious_output_routine_dir: "C:/Users/Public/projects/Pathoryx/data/suspicious"
-final_output_dir: "C:/Users/Public/projects/Pathoryx/data/final"
-final_slide_index_xlsx: "C:/Users/Public/projects/Pathoryx/data/final_slide_ids.xlsx"
+watch_dir: "C:/Users/Public/projects/Palantir/data/watch"
+staging_dir: "C:/Users/Public/projects/Palantir/data/staging"
+failed_output_dir: "C:/Users/Public/projects/Palantir/data/failed"
+suspicious_output_routine_dir: "C:/Users/Public/projects/Palantir/data/suspicious"
+final_output_dir: "C:/Users/Public/projects/Palantir/data/final"
+final_slide_index_xlsx: "C:/Users/Public/projects/Palantir/data/final_slide_ids.xlsx"
 
-run_output_dir: "C:/Users/Public/projects/Pathoryx/data/run_output"
-metadata_excel_path: "C:/Users/Public/projects/Pathoryx/data/run_output/slide_metadata.xlsx"
+run_output_dir: "C:/Users/Public/projects/Palantir/data/run_output"
+metadata_excel_path: "C:/Users/Public/projects/Palantir/data/run_output/slide_metadata.xlsx"
 
-label_root_dir: "C:/Users/Public/projects/Pathoryx/data/labels"
-label_crops_dir: "C:/Users/Public/projects/Pathoryx/data/label_crops"
+label_root_dir: "C:/Users/Public/projects/Palantir/data/labels"
+label_crops_dir: "C:/Users/Public/projects/Palantir/data/label_crops"
 
 # SQLite is used only as a legacy fallback; PostgreSQL is the primary DB.
-sqlite_db_path: "C:/Users/Public/projects/Pathoryx/data/WSI-Babel-Shark.sqlite"
+sqlite_db_path: "C:/Users/Public/projects/Palantir/data/WSI-Babel-Shark.sqlite"
 ops_table: "WSI_Babel_Shark_ops"
 
 scripts:
@@ -84,8 +84,8 @@ roiset_root: "./roisets"
 
 pxl_offset: 8
 roi_pxl_offset: 12
-roi_debug_dir: "C:/Users/Public/projects/Pathoryx/data/roi_debug"
-debug_parts_root: "C:/Users/Public/projects/Pathoryx/data/roi_debug_parts"
+roi_debug_dir: "C:/Users/Public/projects/Palantir/data/roi_debug"
+debug_parts_root: "C:/Users/Public/projects/Palantir/data/roi_debug_parts"
 
 allowed_labid_letters:
   - "E"
@@ -163,7 +163,7 @@ extraction_rules:
     default_value: null
 
 sqlite:
-  db_path: "C:/Users/Public/projects/Pathoryx/data/WSI-Babel-Shark.sqlite"
+  db_path: "C:/Users/Public/projects/Palantir/data/WSI-Babel-Shark.sqlite"
   sqlite_source_table: "slides_raw"
   sqlite_clean_table: "normalized_slides"
   scanner_name_map:
@@ -177,8 +177,8 @@ ocr_crop_config:
 
 extra_field_extractor:
   enabled: false
-  input_dir: "C:/Users/Public/projects/Pathoryx/data/labels"
-  output_dir: "C:/Users/Public/projects/Pathoryx/data/run_output"
+  input_dir: "C:/Users/Public/projects/Palantir/data/labels"
+  output_dir: "C:/Users/Public/projects/Palantir/data/run_output"
   output_excel_name: "extra_field_results.xlsx"
   debug_keys: false
   only_fields:
@@ -188,9 +188,9 @@ extra_field_extractor:
 
 slide_id_generator:
   dry_run: true
-  final_output_dir: "C:/Users/Public/projects/Pathoryx/data/final"
-  failed_output_dir: "C:/Users/Public/projects/Pathoryx/data/failed"
-  final_slide_index_xlsx: "C:/Users/Public/projects/Pathoryx/data/final_slide_ids.xlsx"
+  final_output_dir: "C:/Users/Public/projects/Palantir/data/final"
+  failed_output_dir: "C:/Users/Public/projects/Palantir/data/failed"
+  final_slide_index_xlsx: "C:/Users/Public/projects/Palantir/data/final_slide_ids.xlsx"
   extras:
     enabled: false
     sep: "_"
@@ -203,7 +203,7 @@ slide_id_generator:
 research_case_generator:
   enabled: false
   case_list_excel: "./resources/case_blacklist.xlsx"
-  destination_dir: "C:/Users/Public/projects/Pathoryx/data/special_cases"
+  destination_dir: "C:/Users/Public/projects/Palantir/data/special_cases"
   excel_sheet: 0
 
 pasnet_validator:
@@ -214,11 +214,11 @@ pasnet_validator:
   server_env: "PASNET_SERVER"
   username_env: "PASNET_USERNAME"
   password_env: "PASNET_PASSWORD"
-  report_xlsx_path: "C:/Users/Public/projects/Pathoryx/data/run_output/pasnet_validation_report.xlsx"
+  report_xlsx_path: "C:/Users/Public/projects/Palantir/data/run_output/pasnet_validation_report.xlsx"
   report_sheet_results: "results"
   report_sheet_overrides: "overrides"
-  suspicious_output_routine_dir: "C:/Users/Public/projects/Pathoryx/data/suspicious"
-  sqlite_db_path: "C:/Users/Public/projects/Pathoryx/data/WSI-Babel-Shark.sqlite"
+  suspicious_output_routine_dir: "C:/Users/Public/projects/Palantir/data/suspicious"
+  sqlite_db_path: "C:/Users/Public/projects/Palantir/data/WSI-Babel-Shark.sqlite"
   sqlite_auto_register: true
   ops_table: "WSI_Babel_Shark_ops"
   log_table: "WSI_Babel_Shark_pre_rename_pasnet_log"

@@ -1,5 +1,5 @@
 """
-Process supervisor for the Pathoryx Enterprise pipeline.
+Process supervisor for the Palantir Enterprise pipeline.
 
 Manages all service processes as subprocesses. Each service is launched
 via its CLI entry point (registered in pyproject.toml). The supervisor:

@@ -64,10 +64,10 @@ pipeline:
   target_system: pathoryx
 
 models:
-  penmark_weights: /home/shahram/Pathoryx-Enterprise/models_weights/penmark_detection_MobileNetV3.pth
-  bubble_weights:  /home/shahram/Pathoryx-Enterprise/models_weights/bubble_detection_ConvNeXtTiny_model.pth
-  stain_weights:   /home/shahram/Pathoryx-Enterprise/models_weights/stain_model_MobileNetV3.pth
-  blur_weights:    /home/shahram/Pathoryx-Enterprise/models_weights/blur_detection_resnet18_old.pth
+  penmark_weights: /home/shahram/Palantir/models_weights/penmark_detection_MobileNetV3.pth
+  bubble_weights:  /home/shahram/Palantir/models_weights/bubble_detection_ConvNeXtTiny_model.pth
+  stain_weights:   /home/shahram/Palantir/models_weights/stain_model_MobileNetV3.pth
+  blur_weights:    /home/shahram/Palantir/models_weights/blur_detection_resnet18_old.pth
 
 modules:
   enable_stain: true
@@ -115,7 +115,7 @@ postgres:
 Enterprise routing and policy config. Controls mode, scanner policies, and downstream wiring.
 
 ```yaml
-# Pathoryx Enterprise — QC Service Routing & Scanner Policy Configuration
+# Palantir Enterprise — QC Service Routing & Scanner Policy Configuration
 # Loaded by QCSettings via env var: QC_SERVICE_CONFIG
 # This file controls WHAT to do with files and WHERE they go.
 # The inference config (qc_config.yaml) controls HOW inference is performed.
@@ -124,7 +124,7 @@ service:
   enabled: true
 
   # Path to the old adapter inference config (models, thresholds, decisions).
-  inference_config_path: /home/shahram/Pathoryx-Enterprise/configs/qc_config.yaml
+  inference_config_path: /home/shahram/Palantir/configs/qc_config.yaml
 
   # Global mode — which intake pipelines to run.
   # "pre_babelshark"  : watcher-only (QC runs before BabelShark)
@@ -167,7 +167,7 @@ post_babelshark:
 #   input_dir            : folder to watch (pre_babelshark mode only)
 #   pathoryx_qc_enabled  : if false, skip QC and route directly
 #   qc_position          : "pre_babelshark" | "post_babelshark" | "both" | "none"
-#   trust_scanner_qc     : if true, skip Pathoryx QC (scanner internal QC is trusted)
+#   trust_scanner_qc     : if true, skip Palantir QC (scanner internal QC is trusted)
 #   qc_skip_reason       : recorded in DB when skipping
 #   file_routing         : "copy" or "move" (overrides pre_babelshark.file_routing)
 #   passed_output_dir    : where QC-passed files go (pre_babelshark: → BabelShark watch dir)
@@ -275,7 +275,7 @@ ALTER TABLE qc.qc_results ADD COLUMN scanner_name  TEXT;
 ALTER TABLE qc.qc_results ADD COLUMN trust_scanner_qc     BOOLEAN;
   -- was the scanner's internal QC trusted?
 ALTER TABLE qc.qc_results ADD COLUMN pathoryx_qc_required BOOLEAN;
-  -- was Pathoryx QC required by policy?
+  -- was Palantir QC required by policy?
 ALTER TABLE qc.qc_results ADD COLUMN qc_skip_reason TEXT;
   -- populated when pathoryx_qc_required=false or trust_scanner_qc=true
 
@@ -412,7 +412,7 @@ If trust_scanner_qc=true or pathoryx_qc_enabled=false:
 After implementation, every file has explicit answers to these questions:
 
 ```sql
--- Was Pathoryx QC run on this file?
+-- Was Palantir QC run on this file?
 SELECT
     fr.canonical_path,
     fr.scanner_id,

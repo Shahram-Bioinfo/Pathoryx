@@ -703,7 +703,7 @@ class TestExternalRenameDetection:
     def test_renamed_to_valid_id_is_parsed(self):
         from pathoryx_enterprise.services.recovery_sentry.slide_id_parser import parse_slide_id
 
-        # Simulate a file that was manually renamed to a valid Pathoryx ID
+        # Simulate a file that was manually renamed to a valid Palantir ID
         result = parse_slide_id("N2024002863SA-1-1-H&E_UTC2024-08-22T08_36_39Z.svs")
         assert result is not None
         assert result.case_id == "N2024002863"

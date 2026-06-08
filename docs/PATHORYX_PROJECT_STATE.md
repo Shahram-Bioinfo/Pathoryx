@@ -1,4 +1,4 @@
-# Pathoryx Enterprise — Project State Report
+# Palantir Enterprise — Project State Report
 
 Generated: 2026-06-05 | Last updated: 2026-06-05 (Phase 2 cleanup)
 
@@ -6,7 +6,7 @@ Generated: 2026-06-05 | Last updated: 2026-06-05 (Phase 2 cleanup)
 
 ## 1. Current Architecture Summary
 
-Pathoryx Enterprise is a **production-grade WSI (Whole Slide Image) ingestion and processing pipeline** processing 500–1000 slides/day across four main stages:
+Palantir Enterprise is a **production-grade WSI (Whole Slide Image) ingestion and processing pipeline** processing 500–1000 slides/day across four main stages:
 
 ```
 [Watch Folder] → BabelShark (intake/enrichment)
@@ -274,8 +274,8 @@ detected → linked | unlinked → reviewed → requeued | dismissed
 **Status: Active test environment configured and ready for first end-to-end run**
 
 - Conda environment: `C:\Users\Public\conda-envs\babelfish1` (Python 3.12)
-- Project clone target: `C:\Users\Public\projects\Pathoryx\`
-- All configs have Windows paths set (`C:/Users/Public/projects/Pathoryx/data/...`)
+- Project clone target: `C:\Users\Public\projects\Palantir\`
+- All configs have Windows paths set (`C:/Users/Public/projects/Palantir/data/...`)
 - Data folder structure created via `.gitkeep` files in `data/`
 - `WINDOWS_SETUP.md` documents full step-by-step setup
 - Dashboard frontend: `npm run dev` → http://localhost:5173; built version → http://127.0.0.1:8090
@@ -331,7 +331,7 @@ qc_output, quarantine
 
 ### Install project (Linux/Mac)
 ```bash
-cd /home/shahram/Pathoryx-Enterprise
+cd /home/shahram/Palantir
 pip install -e .
 pip install -e ".[qc]"
 pip install -e ".[dashboard]"
@@ -357,7 +357,7 @@ psql "$DATABASE_URL" -c "\dn"
 
 ### Run unit tests
 ```bash
-cd /home/shahram/Pathoryx-Enterprise
+cd /home/shahram/Palantir
 pytest tests/unit/ -v
 ```
 

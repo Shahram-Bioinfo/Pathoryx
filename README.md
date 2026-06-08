@@ -1,4 +1,4 @@
-# Pathoryx
+# Palantir
 
 Whole Slide Image (WSI) ingestion and processing pipeline.
 Processes 500–1000 slides/day across BabelShark intake, QC inference, DICOM conversion, and PACS upload.
@@ -7,7 +7,7 @@ Processes 500–1000 slides/day across BabelShark intake, QC inference, DICOM co
 
 ```bash
 # 1. Clone / navigate
-cd /home/shahram/Pathoryx-Enterprise
+cd /home/shahram/Palantir
 
 # 2. Configure
 cp .env.example .env
@@ -80,7 +80,7 @@ All services communicate via `core.service_trigger` (PostgreSQL). No message bro
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design, DB schema, state machine |
 | [OPERATIONS.md](OPERATIONS.md) | Start/stop, health checks, monitoring queries |
 | [OBSERVABILITY.md](OBSERVABILITY.md) | Prometheus metrics, OTel tracing, log format |
-| [MIGRATION_PLAN.md](MIGRATION_PLAN.md) | How to migrate from original Pathoryx |
+| [MIGRATION_PLAN.md](MIGRATION_PLAN.md) | How to migrate from original Palantir |
 | [FAILURE_RECOVERY.md](FAILURE_RECOVERY.md) | Dead-letter queue, crashed runner recovery |
 | [SECURITY_MODEL.md](SECURITY_MODEL.md) | Credentials, DB privileges, path validation |
 | [CLEANUP_REPORT.md](CLEANUP_REPORT.md) | All bugs fixed vs original project |

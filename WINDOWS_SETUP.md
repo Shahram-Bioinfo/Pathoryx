@@ -1,6 +1,6 @@
-# Pathoryx — Windows Test Environment Setup
+# Palantir — Windows Test Environment Setup
 
-Step-by-step guide to run the full Pathoryx pipeline on Windows using the
+Step-by-step guide to run the full Palantir pipeline on Windows using the
 `C:\Users\Public\conda-envs\babelfish1` Conda environment.
 
 ---
@@ -41,14 +41,14 @@ python --version   # should be 3.12.x
 
 ```powershell
 cd C:\Users\Public\projects
-git clone git@github.com:Shahram-Bioinfo/Pathoryx.git
-cd Pathoryx
+git clone git@github.com:Shahram-Bioinfo/Palantir.git
+cd Palantir
 ```
 
 If the folder already exists:
 
 ```powershell
-cd C:\Users\Public\projects\Pathoryx
+cd C:\Users\Public\projects\Palantir
 git pull origin main
 ```
 
@@ -131,7 +131,7 @@ The folders are already present after cloning — no extra action needed.
 To verify:
 
 ```powershell
-dir C:\Users\Public\projects\Pathoryx\data\
+dir C:\Users\Public\projects\Palantir\data\
 ```
 
 Expected folders: `watch`, `scanner_fake`, `staging`, `final`, `failed`, `suspicious`,
@@ -175,7 +175,7 @@ pathoryx-dashboard
 ## 10. Start the dashboard frontend
 
 ```powershell
-cd C:\Users\Public\projects\Pathoryx\dashboard-ui
+cd C:\Users\Public\projects\Palantir\dashboard-ui
 npm install
 npm run dev
 ```
@@ -191,7 +191,7 @@ Or use the built version (served by the FastAPI backend): http://127.0.0.1:8090
 Copy any `.svs`, `.ndpi`, `.tiff`, or other supported WSI file into:
 
 ```
-C:\Users\Public\projects\Pathoryx\data\watch\
+C:\Users\Public\projects\Palantir\data\watch\
 ```
 
 BabelShark will detect and process it within 1 minute (configured in `watch_interval_minutes`).

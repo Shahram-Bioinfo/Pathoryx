@@ -1,5 +1,5 @@
 # =============================================================================
-# Pathoryx — DICOM Service Configuration
+# Palantir — DICOM Service Configuration
 # Windows Test Environment
 #
 # Upload is DRY-RUN by default for initial testing.
@@ -17,8 +17,8 @@ dicom_service:
 
 paths:
   input_dirs:
-    - "/home/shahram/Pathoryx-Enterprise/data/final"
-  output_root: "/home/shahram/Pathoryx-Enterprise/data/dicom_output"
+    - "/home/shahram/Palantir/data/final"
+  output_root: "/home/shahram/Palantir/data/dicom_output"
 
 cleanup:
   delete_after_x_days: null

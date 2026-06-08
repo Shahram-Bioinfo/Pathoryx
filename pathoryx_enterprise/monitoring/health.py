@@ -1,5 +1,5 @@
 """
-Health check logic for Pathoryx services.
+Health check logic for Palantir services.
 
 Provides three standard Kubernetes probe semantics:
   - liveness  (/live)  — is the process alive and not deadlocked?

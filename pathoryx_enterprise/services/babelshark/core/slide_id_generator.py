@@ -386,7 +386,7 @@ def _parse_scan_time_to_iso_z(raw: str) -> Optional[str]:
 
 
 def _scan_ts_iso_z_from_db(path: Path) -> Optional[str]:
-    """Return ScanTime_UTC from Pathoryx PostgreSQL metadata when available.
+    """Return ScanTime_UTC from Palantir PostgreSQL metadata when available.
 
     This function is deliberately safe:
       - DB import failure returns None.
@@ -927,7 +927,7 @@ def pick_source_and_dest(
 
 
 # =============================================================================
-# Pathoryx DB final-route synchronization
+# Palantir DB final-route synchronization
 # =============================================================================
 
 def _truthy_cfg(value: object, default: bool = True) -> bool:
@@ -957,7 +957,7 @@ def _status_for_final_route(row_status: str) -> str:
 
 
 def _sync_final_route_records_to_db(records: List[Dict[str, Any]], cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Update existing Pathoryx FileRecord rows after slide_id_generator routes files.
+    """Update existing Palantir FileRecord rows after slide_id_generator routes files.
 
     This function intentionally does not create new FileRecord rows. The ingest
     FileRecord must already exist from collect_slides/register_collected_file.

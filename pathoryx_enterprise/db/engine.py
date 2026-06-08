@@ -28,7 +28,7 @@ def _get_required_env(name: str) -> str:
     if not value:
         raise RuntimeError(
             f"Required environment variable {name!r} is not set. "
-            "Set it in your .env file or shell environment before starting Pathoryx."
+            "Set it in your .env file or shell environment before starting Palantir."
         )
     return value
 

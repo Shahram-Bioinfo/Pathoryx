@@ -1,5 +1,5 @@
 """
-Structured logging for Pathoryx.
+Structured logging for Palantir.
 
 Uses structlog backed by the stdlib logging machinery so that:
   - structlog.stdlib processors (add_logger_name, add_log_level) work correctly

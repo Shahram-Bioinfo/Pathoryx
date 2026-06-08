@@ -1,5 +1,5 @@
 """
-Prometheus metrics registry for all Pathoryx services.
+Prometheus metrics registry for all Palantir services.
 
 All metrics are registered once at import time. Each service uses the
 subset relevant to it by importing specific metric objects.

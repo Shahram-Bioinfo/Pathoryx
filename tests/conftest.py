@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for Pathoryx Enterprise tests.
+Pytest configuration and shared fixtures for Palantir Enterprise tests.
 
 Fixtures:
   - tmp_db_url: SQLite in-memory URL for unit tests (no Postgres required)

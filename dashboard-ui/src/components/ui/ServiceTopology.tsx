@@ -4,7 +4,7 @@ import type { QueueRow, RunnerItem } from '../../types/api'
 /*
  * ServiceTopology — full-width operational network diagram.
  *
- * Visualises the six Pathoryx services as a connected graph showing live
+ * Visualises the six Palantir services as a connected graph showing live
  * runner health, queue pressure, and last activity in a single glance.
  *
  * Visual language:

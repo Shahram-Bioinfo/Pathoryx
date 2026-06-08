@@ -1,11 +1,11 @@
 # =============================================================================
-# Pathoryx — QC Inference Configuration
+# Palantir — QC Inference Configuration
 # Windows Test Environment
 # =============================================================================
 
 paths:
-  output_root: "/home/shahram/Pathoryx-Enterprise/data/qc_output"
-  quarantine_root: "/home/shahram/Pathoryx-Enterprise/data/quarantine"
+  output_root: "/home/shahram/Palantir/data/qc_output"
+  quarantine_root: "/home/shahram/Palantir/data/quarantine"
 
 pipeline:
   pipeline_name: slide_qc_service
@@ -13,7 +13,7 @@ pipeline:
 
 watcher:
   input_dirs:
-    - "/home/shahram/Pathoryx-Enterprise/data/watch"
+    - "/home/shahram/Palantir/data/watch"
   poll_interval_seconds: 10
   recursive: true
   stable_file_wait_seconds: 20
@@ -26,10 +26,10 @@ watcher:
     - ".vms"
 
 models:
-  penmark_weights: "/home/shahram/Pathoryx-Enterprise/models_weights/penmark_detection_MobileNetV3.pth"
-  bubble_weights: "/home/shahram/Pathoryx-Enterprise/models_weights/bubble_detection_ConvNeXtTiny_model.pth"
-  stain_weights: "/home/shahram/Pathoryx-Enterprise/models_weights/stain_model_MobileNetV3.pth"
-  blur_weights: "/home/shahram/Pathoryx-Enterprise/models_weights/blur_detection_resnet18_old.pth"
+  penmark_weights: "/home/shahram/Palantir/models_weights/penmark_detection_MobileNetV3.pth"
+  bubble_weights: "/home/shahram/Palantir/models_weights/bubble_detection_ConvNeXtTiny_model.pth"
+  stain_weights: "/home/shahram/Palantir/models_weights/stain_model_MobileNetV3.pth"
+  blur_weights: "/home/shahram/Palantir/models_weights/blur_detection_resnet18_old.pth"
 
 modules:
   enable_stain: true

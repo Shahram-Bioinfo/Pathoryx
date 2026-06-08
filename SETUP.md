@@ -14,12 +14,12 @@
 ## 1. Create a virtual environment
 
 ```bash
-cd /home/shahram/Pathoryx-Enterprise
+cd /home/shahram/Palantir
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Add `source /home/shahram/Pathoryx-Enterprise/.venv/bin/activate` to your shell profile to activate automatically.
+Add `source /home/shahram/Palantir/.venv/bin/activate` to your shell profile to activate automatically.
 
 ## 2. Install the package
 
@@ -55,7 +55,7 @@ DICOM_CONFIG=/path/to/dicom.yaml
 SECTRA_HOST=your-pacs-host
 SECTRA_PORT=4242
 SECTRA_REMOTE_AE=SECTRA
-SECTRA_LOCAL_AE=PATHORYX
+SECTRA_LOCAL_AE=PALANTIR
 PATHORYX_ALLOWED_INPUT_ROOTS=/data/slides,/mnt/nfs/incoming
 ```
 

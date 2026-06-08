@@ -11,7 +11,7 @@ from pathoryx_enterprise.utils.checksum import compute_sha256 as compute_sha256_
 
 def test_checksum_matches_stdlib(tmp_path: Path) -> None:
     """Streaming SHA-256 must match hashlib reference for same file."""
-    data = b"Hello Pathoryx " * 10_000
+    data = b"Hello Palantir " * 10_000
     test_file = tmp_path / "test.bin"
     test_file.write_bytes(data)
 

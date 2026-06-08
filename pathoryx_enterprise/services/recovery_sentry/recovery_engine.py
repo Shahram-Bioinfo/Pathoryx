@@ -2,11 +2,11 @@
 RecoverySentry recovery engine.
 
 Decides whether a changed/added file can be auto-recovered into the normal
-Pathoryx pipeline, and executes the recovery if so.
+Palantir pipeline, and executes the recovery if so.
 
 Decision tree:
   1. Extension must be a supported WSI format.
-  2. Filename must parse as a valid Pathoryx SlideID.
+  2. Filename must parse as a valid Palantir SlideID.
   3. If timestamp is in the filename → Case 1 (ready to move).
   4. If timestamp is missing → extract from WSI metadata.
      If extraction fails → manual_review_required(missing_timestamp_metadata).
