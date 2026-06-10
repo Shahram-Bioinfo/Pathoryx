@@ -5,6 +5,15 @@
 # Copy this file to configs\qc_config.yaml (or set QC_CONFIG_PATH in .env).
 # =============================================================================
 
+# =============================================================================
+# OpenSlide DLL path — Windows only.
+# Preferred approach: set the OPENSLIDE_DLL_PATH environment variable.
+# This config key is a fallback for launchers that cannot set env vars.
+# QC service reads the env var directly; this key is for documentation only.
+# =============================================================================
+dll_paths:
+  openslide_dll: ""   # set via OPENSLIDE_DLL_PATH env var (recommended) or enter path here
+
 paths:
   output_root: "C:/Users/Public/projects/Palantir/data/qc_output"
   quarantine_root: "C:/Users/Public/projects/Palantir/data/quarantine"

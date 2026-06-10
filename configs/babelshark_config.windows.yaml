@@ -6,6 +6,20 @@
 # BABELSHARK_CONFIG_PATH in .env to point here directly).
 # ============================================================
 
+# =============================================================================
+# OpenSlide DLL path — Windows only.
+# Prefer setting OPENSLIDE_DLL_PATH as an environment variable (it takes
+# priority over this config key).  Only set this key as a fallback when you
+# cannot set the env var (e.g. legacy launcher without .env support).
+#
+# Download OpenSlide Windows binaries from:
+#   https://github.com/openslide/openslide-winbuild/releases
+# Extract and set the path to the bin\ subdirectory.
+# Example: D:\tools\openslide-bin-4.0.0.8-windows-x64\bin
+# =============================================================================
+dll_paths:
+  openslide_dll: ""   # set via OPENSLIDE_DLL_PATH env var (recommended) or enter path here
+
 enable_full_pipeline: true
 defer_trigger: true
 

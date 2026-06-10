@@ -83,6 +83,7 @@ def _process_folder(
     current_state = scan_folder(
         folder_path,
         allowed_roots=settings.allowed_roots or [folder_path],
+        recursive=settings.scan_subfolders,
     )
 
     # Filter to stable files only

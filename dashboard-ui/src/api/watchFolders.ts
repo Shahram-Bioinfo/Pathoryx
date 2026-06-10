@@ -4,6 +4,7 @@ import type {
   FilenameValidationResponse,
   LabelPreviewResponse,
   MonitoredFilesResponse,
+  OpenFolderResponse,
   ReviewStateUpdateRequest,
   ReviewStateUpdateResponse,
   TechnicianRenameRequest,
@@ -57,3 +58,6 @@ export const patchReviewState = (
   body: ReviewStateUpdateRequest,
 ): Promise<ReviewStateUpdateResponse> =>
   apiPatch<ReviewStateUpdateResponse>(`/recovery/changes/${changeId}/review-state`, body)
+
+export const postOpenFolder = (fileId: number): Promise<OpenFolderResponse> =>
+  apiPost<OpenFolderResponse>(`/recovery/files/${fileId}/open-folder`, {})

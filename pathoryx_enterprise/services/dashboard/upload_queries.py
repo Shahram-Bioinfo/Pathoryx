@@ -270,6 +270,31 @@ def update_upload_record(session: Session, record_id: int, updates: dict) -> Opt
     return get_upload_record(session, record_id)
 
 
+def update_upload_priority(session: Session, record_id: int, priority: int) -> Optional[dict]:
+    """
+    Update the priority of a queued upload record.
+
+    Raises ValueError for terminal statuses (uploaded/failed) — priority
+    changes are meaningless once a record is done.
+    Advances last_updated_at so the SSE upload_queue_updated event fires.
+    Returns None if record does not exist.
+    """
+    row = session.execute(
+        select(EstimatedUploadQueue).where(EstimatedUploadQueue.id == record_id)
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    if row.upload_status in _TERMINAL_STATUSES:
+        raise ValueError(f"Cannot change priority of record with status '{row.upload_status}'")
+    session.execute(
+        update(EstimatedUploadQueue)
+        .where(EstimatedUploadQueue.id == record_id)
+        .values(priority=priority, last_updated_at=_now())
+    )
+    session.flush()
+    return get_upload_record(session, record_id)
+
+
 # ---------------------------------------------------------------------------
 # SSE checkpoint helpers
 # ---------------------------------------------------------------------------

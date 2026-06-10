@@ -348,6 +348,11 @@ class MonitoredFileItem(BaseModel):
     file_path: str
     folder_label: str
     folder_path: Optional[str] = None
+    # Path of the containing directory relative to the watch root.
+    # E.g. "2026-06-05" for failed/2026-06-05/slide.svs; "" for top-level files.
+    relative_folder_path: Optional[str] = None
+    # Whether the containing directory currently exists on disk.
+    folder_exists: bool = True
     first_seen_at: Optional[datetime] = None
     last_seen_at: Optional[datetime] = None
     file_size: Optional[int] = None
@@ -369,6 +374,17 @@ class MonitoredFileItem(BaseModel):
 class MonitoredFilesResponse(BaseModel):
     total: int
     items: list[MonitoredFileItem]
+
+
+# ---------------------------------------------------------------------------
+# Recovery — open folder action
+# ---------------------------------------------------------------------------
+
+
+class OpenFolderResponse(BaseModel):
+    opened: bool
+    path: Optional[str] = None
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +712,110 @@ class ServicesHealthResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase 4.4 — Computer Core analytics
+# ---------------------------------------------------------------------------
+
+
+class CoreOverviewResponse(BaseModel):
+    total_slides: int
+    slides_today: int
+    uploaded_today: int
+    failed_slides: int
+    active_uploads: int
+    queued_uploads: int
+    delayed_uploads: int
+    recovery_backlog: int
+    unreviewed_changes: int
+    total_bytes: int
+    status_counts: dict[str, int] = {}
+    upload_status_counts: dict[str, int] = {}
+    as_of: datetime
+
+
+class ScannerActivityItem(BaseModel):
+    scanner_id: str
+    display_name: str
+    total_slides: int = 0
+    failed_count: int = 0
+    uploaded_count: int = 0
+    total_bytes: int = 0
+    avg_file_size: int = 0
+    last_activity: Optional[str] = None
+    avg_upload_speed_mbps: Optional[float] = None
+    operational_state: str = "no_recent_activity"
+
+
+class ScannerActivityResponse(BaseModel):
+    scanners: list[ScannerActivityItem]
+    as_of: datetime
+
+
+class StainDistributionItem(BaseModel):
+    stain_type: str
+    count: int
+    percentage: float
+
+
+class StainDistributionResponse(BaseModel):
+    items: list[StainDistributionItem]
+    total: int
+    as_of: datetime
+
+
+class RecoveryStatsResponse(BaseModel):
+    total_monitored: int
+    failed_count: int
+    suspicious_count: int
+    manual_review_count: int
+    auto_recovered: int
+    manual_review_required: int
+    total_changes: int
+    total_resolved: int
+    recovery_rate: float
+    recent_7d: int
+    by_folder: dict[str, int] = {}
+    by_review_status: dict[str, int] = {}
+    by_outcome: dict[str, int] = {}
+    as_of: datetime
+
+
+class StorageScannerItem(BaseModel):
+    scanner_id: str
+    count: int
+    total_bytes: int
+    avg_bytes: int
+
+
+class StorageStatsResponse(BaseModel):
+    total_slides_with_size: int
+    total_bytes: int
+    avg_bytes: int
+    max_bytes: int
+    min_bytes: int
+    uploaded_today_bytes: int
+    by_scanner: list[StorageScannerItem] = []
+    as_of: datetime
+
+
+class DailyUploadCount(BaseModel):
+    day: Optional[str] = None
+    count: int
+
+
+class UploadVelocityResponse(BaseModel):
+    avg_speed_mbps: Optional[float] = None
+    avg_duration_seconds: Optional[float] = None
+    total_in_queue: int
+    completed_total: int
+    failed_total: int
+    total_retries: int
+    queue_depth: int
+    delayed_count: int
+    daily_uploads_7d: list[DailyUploadCount] = []
+    as_of: datetime
+
+
+# ---------------------------------------------------------------------------
 # Phase 3.5 — Upload Operations
 # ---------------------------------------------------------------------------
 
@@ -772,6 +892,11 @@ class UploadQueueUpdateRequest(BaseModel):
     upload_speed_mbps: Optional[float] = None
     failure_reason: Optional[str] = None
     retry_count: Optional[int] = None
+
+
+class UploadPriorityRequest(BaseModel):
+    priority: int  # 0=upload_next, 5=normal, 9=low
+    reason: Optional[str] = None
 
 
 class UploadFilterOptions(BaseModel):

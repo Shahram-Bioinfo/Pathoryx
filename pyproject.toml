@@ -36,17 +36,59 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ── QC inference — full ML pipeline ─────────────────────────────────────────
 qc = [
     "torch>=2.2.0",
     "torchvision>=0.17.0",
     "Pillow>=10.3.0",
     "numpy>=1.26.0",
     "opencv-python-headless>=4.9.0",
+    "openslide-python>=4.0.0",
 ]
+
+# ── BabelShark WSI intake ────────────────────────────────────────────────────
+babelshark = [
+    "Pillow>=10.3.0",
+    "numpy>=1.26.0",
+    "opencv-python-headless>=4.9.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "pydicom>=2.4.0",
+    "reportlab>=4.0.0",
+    "openslide-python>=4.0.0",
+    "tqdm>=4.66.0",
+]
+
+# ── Dashboard backend ─────────────────────────────────────────────────────────
 dashboard = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
 ]
+
+# ── DICOM conversion service ─────────────────────────────────────────────────
+dicom = [
+    "pydicom>=2.4.0",
+]
+
+# ── OCR stain extraction (easyocr-based) ─────────────────────────────────────
+ocr = [
+    "easyocr>=1.7.0",
+]
+
+# ── DataMatrix barcode decoding ───────────────────────────────────────────────
+datamatrix = [
+    "pylibdmtx>=0.1.10",
+    "tqdm>=4.66.0",
+]
+
+# ── Windows platform extras ───────────────────────────────────────────────────
+# pywin32 is useful for Windows service management, COM interop, and registry
+# access.  The conditional marker ensures pip skips this on Linux/macOS.
+windows = [
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+# ── Development and testing ───────────────────────────────────────────────────
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",

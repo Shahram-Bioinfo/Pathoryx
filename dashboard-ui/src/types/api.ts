@@ -280,6 +280,10 @@ export interface MonitoredFileItem {
   file_path: string
   folder_label: string
   folder_path: string | null
+  /** Path of the containing directory relative to the watch root (e.g. "2026-06-05"). Empty string for top-level files. */
+  relative_folder_path: string | null
+  /** Whether the containing directory currently exists on disk. */
+  folder_exists: boolean
   first_seen_at: string | null
   last_seen_at: string | null
   file_size: number | null
@@ -301,6 +305,14 @@ export interface MonitoredFileItem {
 export interface MonitoredFilesResponse {
   total: number
   items: MonitoredFileItem[]
+}
+
+// ---- Recovery — open folder action ----
+
+export interface OpenFolderResponse {
+  opened: boolean
+  path: string | null
+  message: string
 }
 
 // ---- Recovery — technician rename ----
@@ -662,6 +674,114 @@ export interface UploadIngestRequest {
 export interface UploadIngestResponse {
   upserted_count: number
   skipped_count: number
+}
+
+export interface UploadPriorityRequest {
+  /** 0 = upload_next, 5 = normal, 9 = low */
+  priority: number
+  reason?: string
+}
+
+// ---- Phase 4.4 — Computer Core analytics ----
+
+export interface CoreOverviewResponse {
+  total_slides: number
+  slides_today: number
+  uploaded_today: number
+  failed_slides: number
+  active_uploads: number
+  queued_uploads: number
+  delayed_uploads: number
+  recovery_backlog: number
+  unreviewed_changes: number
+  total_bytes: number
+  status_counts: Record<string, number>
+  upload_status_counts: Record<string, number>
+  as_of: string
+}
+
+export interface ScannerActivityItem {
+  scanner_id: string
+  display_name: string
+  total_slides: number
+  failed_count: number
+  uploaded_count: number
+  total_bytes: number
+  avg_file_size: number
+  last_activity: string | null
+  avg_upload_speed_mbps: number | null
+  /** active | idle | no_recent_activity */
+  operational_state: string
+}
+
+export interface ScannerActivityResponse {
+  scanners: ScannerActivityItem[]
+  as_of: string
+}
+
+export interface StainDistributionItem {
+  stain_type: string
+  count: number
+  percentage: number
+}
+
+export interface StainDistributionResponse {
+  items: StainDistributionItem[]
+  total: number
+  as_of: string
+}
+
+export interface RecoveryStatsResponse {
+  total_monitored: number
+  failed_count: number
+  suspicious_count: number
+  manual_review_count: number
+  auto_recovered: number
+  manual_review_required: number
+  total_changes: number
+  total_resolved: number
+  recovery_rate: number
+  recent_7d: number
+  by_folder: Record<string, number>
+  by_review_status: Record<string, number>
+  by_outcome: Record<string, number>
+  as_of: string
+}
+
+export interface StorageScannerItem {
+  scanner_id: string
+  count: number
+  total_bytes: number
+  avg_bytes: number
+}
+
+export interface StorageStatsResponse {
+  total_slides_with_size: number
+  total_bytes: number
+  avg_bytes: number
+  max_bytes: number
+  min_bytes: number
+  uploaded_today_bytes: number
+  by_scanner: StorageScannerItem[]
+  as_of: string
+}
+
+export interface DailyUploadCount {
+  day: string | null
+  count: number
+}
+
+export interface UploadVelocityResponse {
+  avg_speed_mbps: number | null
+  avg_duration_seconds: number | null
+  total_in_queue: number
+  completed_total: number
+  failed_total: number
+  total_retries: number
+  queue_depth: number
+  delayed_count: number
+  daily_uploads_7d: DailyUploadCount[]
+  as_of: string
 }
 
 // ---- Phase 3.6 — Scanner Fleet ----

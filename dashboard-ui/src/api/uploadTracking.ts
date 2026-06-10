@@ -4,6 +4,7 @@ import type {
   UploadIngestRequest,
   UploadIngestResponse,
   UploadMetrics,
+  UploadPriorityRequest,
   UploadQueueItem,
   UploadQueueResponse,
 } from '../types/api'
@@ -45,3 +46,9 @@ export const putUploadRecord = (
   updates: Partial<Pick<UploadQueueItem, 'upload_status' | 'estimated_upload_at' | 'upload_started_at' | 'upload_completed_at' | 'upload_speed_mbps' | 'failure_reason' | 'retry_count'>>,
 ): Promise<UploadQueueItem> =>
   apiPatch<UploadQueueItem>(`/uploads/queue/${recordId}`, updates)
+
+export const patchUploadPriority = (
+  recordId: number,
+  body: UploadPriorityRequest,
+): Promise<UploadQueueItem> =>
+  apiPatch<UploadQueueItem>(`/uploads/queue/${recordId}/priority`, body)

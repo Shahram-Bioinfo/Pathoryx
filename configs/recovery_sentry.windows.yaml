@@ -23,6 +23,10 @@ final_destination_root: "C:/Users/Public/projects/Palantir/data/final"
 # BabelShark config to resolve final_output_dir if final_destination_root is not set.
 babelshark_config_path: ./configs/babelshark_config.yaml
 
+# Scan all subfolders under each watch_folder (e.g. date-based subdirectories).
+# Set to false to restrict scanning to immediate children only.
+scan_subfolders: true
+
 recovery:
   auto_recover_valid_slide_id: true
   add_timestamp_if_missing: true

@@ -74,6 +74,9 @@ class RecoverySentrySettings(BaseSettings):
     # Optional manual-approval gate
     requires_approval_default: bool = False
 
+    # Recursive folder scanning
+    scan_subfolders: bool = True
+
     # Max consecutive errors before aborting
     max_consecutive_errors: int = 20
 
@@ -141,6 +144,10 @@ class RecoverySentrySettings(BaseSettings):
             self.allow_filesystem_timestamp_fallback = bool(
                 rec["allow_filesystem_timestamp_fallback"]
             )
+        # scan_subfolders can live either at top-level or under recovery:
+        _ssf = raw.get("scan_subfolders") if "scan_subfolders" in raw else rec.get("scan_subfolders")
+        if _ssf is not None:
+            self.scan_subfolders = bool(_ssf)
 
         ns = raw.get("next_stage", {}) or {}
         if ns.get("target_service"):

@@ -13,6 +13,7 @@ import {
   Activity, AlertTriangle, CheckCircle2, Clock,
   CloudUpload, Microscope, Search, XCircle, Zap,
 } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import { KpiCard } from '../components/ui/KpiCard'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -22,6 +23,7 @@ import {
   buildScannerMap, resolveScanner,
   useScannerFleet, useScannerSummary,
 } from '../hooks/useScannerFleet'
+import { patchUploadPriority } from '../api/uploadTracking'
 import type { ScannerMap, ScannerSummaryItem, UploadQueueItem, UploadStatus } from '../types/api'
 import { fmtBytes, fmtDuration } from '../utils/formatters'
 
@@ -213,6 +215,49 @@ function StatusBadge({ status, delayed }: { status: UploadStatus; delayed: boole
 }
 
 // ---------------------------------------------------------------------------
+// Sub-component: Priority badge
+// ---------------------------------------------------------------------------
+
+const PRIORITY_UPLOAD_NEXT = 0
+const PRIORITY_NORMAL       = 5
+const PRIORITY_LOW          = 9
+const _TERMINAL: UploadStatus[] = ['uploaded', 'failed']
+
+function PriorityBadge({ priority }: { priority: number }) {
+  if (priority === PRIORITY_UPLOAD_NEXT) {
+    return (
+      <span
+        className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide"
+        style={{
+          color:      'var(--accent)',
+          background: 'rgba(99,102,241,0.12)',
+          border:     '1px solid rgba(99,102,241,0.30)',
+          letterSpacing: '0.07em',
+        }}
+      >
+        NEXT
+      </span>
+    )
+  }
+  if (priority === PRIORITY_LOW) {
+    return (
+      <span
+        className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wide"
+        style={{
+          color:      'var(--chart-amber)',
+          background: 'rgba(217,119,6,0.08)',
+          border:     '1px solid rgba(217,119,6,0.22)',
+          letterSpacing: '0.07em',
+        }}
+      >
+        LOW
+      </span>
+    )
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Sub-component: Upload timeline (expandable)
 // ---------------------------------------------------------------------------
 
@@ -276,11 +321,29 @@ function UploadTimeline({ item }: { item: UploadQueueItem }) {
 
 function QueueRow({ item, scannerMap }: { item: UploadQueueItem; scannerMap: ScannerMap }) {
   const [expanded, setExpanded] = useState(false)
+  const queryClient = useQueryClient()
+
   const isDelayed = item.is_delayed || (item.estimated_upload_at !== null &&
     new Date(item.estimated_upload_at) < new Date() &&
     item.upload_status !== 'uploaded' && item.upload_status !== 'failed')
+  const isTerminal = (_TERMINAL as string[]).includes(item.upload_status)
+  const isUploading = item.upload_status === 'uploading'
 
-  const rowBg = isDelayed ? 'rgba(217,119,6,0.04)' : undefined
+  const rowBg =
+    !isTerminal && !isUploading && item.priority === PRIORITY_UPLOAD_NEXT
+      ? 'rgba(99,102,241,0.05)'
+      : isDelayed
+      ? 'rgba(217,119,6,0.04)'
+      : undefined
+
+  const priorityMutation = useMutation({
+    mutationFn: (priority: number) => patchUploadPriority(item.id, { priority }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['uploads', 'queue'] })
+    },
+  })
+
+  const canChangePriority = !isTerminal && !priorityMutation.isPending
 
   return (
     <>
@@ -293,7 +356,7 @@ function QueueRow({ item, scannerMap }: { item: UploadQueueItem; scannerMap: Sca
         }}
         onClick={() => setExpanded(e => !e)}
       >
-        {/* Filename */}
+        {/* Filename + priority badge */}
         <td className="py-2.5 pl-4 pr-3">
           <div className="flex items-center gap-1.5">
             {isDelayed && (
@@ -303,11 +366,14 @@ function QueueRow({ item, scannerMap }: { item: UploadQueueItem; scannerMap: Sca
             )}
             <span
               className="font-mono text-[10px] truncate"
-              style={{ color: 'var(--text-primary)', maxWidth: 280 }}
+              style={{ color: 'var(--text-primary)', maxWidth: 260 }}
               title={item.filename}
             >
               {item.filename}
             </span>
+            {item.priority !== PRIORITY_NORMAL && (
+              <PriorityBadge priority={item.priority} />
+            )}
           </div>
           {item.failure_reason && (
             <p className="text-[9px] mt-0.5 truncate" style={{ color: 'var(--chart-rose)', maxWidth: 280 }}
@@ -366,15 +432,61 @@ function QueueRow({ item, scannerMap }: { item: UploadQueueItem; scannerMap: Sca
         </td>
 
         {/* Age */}
-        <td className="py-2.5 pr-4 pl-3 text-[10px]" style={{ color: 'var(--text-faint)' }}>
+        <td className="py-2.5 pl-3 pr-2 text-[10px]" style={{ color: 'var(--text-faint)' }}>
           {fmtAge(item.queued_at)}
+        </td>
+
+        {/* Priority actions */}
+        <td className="py-2 pr-3 pl-1" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1">
+            {/* Upload Next button — only shown when not already next and not terminal */}
+            {!isTerminal && item.priority !== PRIORITY_UPLOAD_NEXT && (
+              <button
+                type="button"
+                disabled={!canChangePriority || isUploading}
+                onClick={() => priorityMutation.mutate(PRIORITY_UPLOAD_NEXT)}
+                title={isUploading ? 'Cannot reprioritize active upload' : 'Move to front of queue'}
+                className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
+                style={{
+                  color:      isUploading ? 'var(--text-faint)' : 'var(--accent)',
+                  background: isUploading ? 'transparent' : 'rgba(99,102,241,0.08)',
+                  border:     `1px solid ${isUploading ? 'var(--border-faint)' : 'rgba(99,102,241,0.25)'}`,
+                  cursor:     (!canChangePriority || isUploading) ? 'not-allowed' : 'pointer',
+                  opacity:    (!canChangePriority || isUploading) ? 0.45 : 1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Upload Next
+              </button>
+            )}
+            {/* Reset button — shown when priority is non-normal and not terminal */}
+            {!isTerminal && item.priority !== PRIORITY_NORMAL && (
+              <button
+                type="button"
+                disabled={!canChangePriority}
+                onClick={() => priorityMutation.mutate(PRIORITY_NORMAL)}
+                title="Reset to normal priority"
+                className="text-[9px] px-1.5 py-0.5 rounded"
+                style={{
+                  color:      'var(--text-muted)',
+                  background: 'transparent',
+                  border:     '1px solid var(--border-faint)',
+                  cursor:     !canChangePriority ? 'not-allowed' : 'pointer',
+                  opacity:    !canChangePriority ? 0.45 : 1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Reset
+              </button>
+            )}
+          </div>
         </td>
       </tr>
 
       {/* Expanded timeline row */}
       {expanded && (
         <tr style={{ background: 'var(--surface-inset)', borderBottom: '1px solid var(--border-faint)' }}>
-          <td colSpan={9} className="px-6 py-3">
+          <td colSpan={10} className="px-6 py-3">
             <UploadTimeline item={item} />
           </td>
         </tr>
@@ -604,7 +716,7 @@ export function UploadOperations() {
             <tr style={{ borderBottom: '1px solid var(--border-default)', background: 'var(--surface-inset)' }}>
               {[
                 'Filename', 'Scanner', 'Host', 'Status',
-                'ETA', 'Size', 'Speed / Duration', 'Retries', 'Age',
+                'ETA', 'Size', 'Speed / Duration', 'Retries', 'Age', '',
               ].map(col => (
                 <th
                   key={col}
@@ -621,7 +733,7 @@ export function UploadOperations() {
             {queueLoading && (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid var(--border-faint)' }}>
-                  <td colSpan={9} className="py-2.5 px-4">
+                  <td colSpan={10} className="py-2.5 px-4">
                     <SkeletonRow />
                   </td>
                 </tr>
@@ -630,7 +742,7 @@ export function UploadOperations() {
 
             {!queueLoading && (!queue?.items || queue.items.length === 0) && (
               <tr>
-                <td colSpan={9} className="py-12 text-center">
+                <td colSpan={10} className="py-12 text-center">
                   <CloudUpload
                     className="mx-auto mb-2 opacity-20"
                     style={{ width: 28, height: 28, color: 'var(--text-faint)' }}

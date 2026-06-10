@@ -42,17 +42,33 @@ def scan_folder(
     folder_path: Path,
     allowed_roots: list[Path],
     extensions: tuple[str, ...] = (".svs", ".ndpi", ".mrxs", ".tiff", ".tif", ".scn", ".czi", ".vsi"),
+    *,
+    recursive: bool = True,
 ) -> dict[str, dict]:
     """
     Return a dict of {canonical_path: {filename, file_size, mtime_ns}}
     for all files in folder_path matching `extensions`.
 
     Uses path traversal protection — any path not under allowed_roots is skipped.
+    Symlinks that resolve outside allowed_roots are silently skipped.
+
+    Args:
+        recursive: When True (default), descend into subdirectories.
+                   When False, only the immediate children of folder_path are scanned.
     """
     result: dict[str, dict] = {}
 
-    for root, _, files in os.walk(folder_path):
+    walker = os.walk(folder_path, followlinks=False)
+    for root, dirs, files in walker:
+        # Prevent hidden/system folder traversal and optionally limit to top level.
+        if not recursive and Path(root) != folder_path:
+            break
+        # Skip hidden directories (starting with '.' on Unix, common on Windows too)
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+
         for fname in files:
+            if fname.startswith('.'):
+                continue
             if not fname.lower().endswith(extensions):
                 continue
             full = Path(root) / fname

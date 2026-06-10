@@ -39,6 +39,9 @@ except ImportError:
 
 def initialize_openslide(dll_path: Optional[str] = None) -> None:
     """Call at service startup to ensure openslide is loaded."""
+    from pathoryx_enterprise.runtime.openslide_setup import configure_openslide_runtime
+    configure_openslide_runtime(dll_path)
+    # Also initialise the babelshark-side openslide module reference if available.
     if _BABELSHARK_AVAILABLE and _bs_setup_openslide is not None:
         _bs_setup_openslide(dll_path)
 

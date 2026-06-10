@@ -30,14 +30,24 @@ from .schemas import (
     ArtifactInvestigationResponse,
     AuditTrailResponse,
     ConversionResultSummary,
+    CoreOverviewResponse,
     DbHealthResponse,
     EnvironmentConfig,
     OperationalIncident,
     OperationalIncidentsResponse,
+    RecoveryStatsResponse,
+    ScannerActivityItem,
+    ScannerActivityResponse,
     ServiceHealthExtended,
     ServiceHealthExtendedResponse,
+    StainDistributionItem,
+    StainDistributionResponse,
+    StorageScannerItem,
+    StorageStatsResponse,
     StuckTriggerItem,
     StuckTriggersResponse,
+    DailyUploadCount,
+    UploadVelocityResponse,
     EventItem,
     EventListResponse,
     ExtractionResultSummary,
@@ -53,6 +63,7 @@ from .schemas import (
     LabelPreviewResponse,
     MonitoredFileItem,
     MonitoredFilesResponse,
+    OpenFolderResponse,
     OverviewResponse,
     QCResultSummary,
     QueueRow,
@@ -82,6 +93,7 @@ from .schemas import (
     UploadIngestRequest,
     UploadIngestResponse,
     UploadMetrics,
+    UploadPriorityRequest,
     UploadQueueItem,
     UploadQueueResponse,
     UploadQueueUpdateRequest,
@@ -854,9 +866,34 @@ def create_app() -> FastAPI:
             logger.warning("recovery_files: query failed: %s", exc)
             return MonitoredFilesResponse(total=0, items=[])
 
+        # Build watch-root-by-label map for relative path computation
+        watch_root_by_label: dict[str, Path] = {}
+        try:
+            from pathoryx_enterprise.services.recovery_sentry.config import RecoverySentrySettings
+            rs = RecoverySentrySettings()
+            watch_root_by_label = {fp.name: fp.resolve() for fp in rs.watch_folders}
+        except Exception:
+            pass
+
+        def _enrich(item: dict) -> dict:
+            label = item.get("folder_label", "")
+            fp_str = item.get("folder_path") or ""
+            rel = ""
+            exists = True
+            if fp_str and label in watch_root_by_label:
+                try:
+                    rel = str(Path(fp_str).relative_to(watch_root_by_label[label]))
+                    if rel == ".":
+                        rel = ""
+                except ValueError:
+                    rel = ""
+            if fp_str:
+                exists = Path(fp_str).exists()
+            return {**item, "relative_folder_path": rel, "folder_exists": exists}
+
         return MonitoredFilesResponse(
             total=total,
-            items=[MonitoredFileItem(**item) for item in items],
+            items=[MonitoredFileItem(**_enrich(item)) for item in items],
         )
 
     # ------------------------------------------------------------------
@@ -1104,6 +1141,94 @@ def create_app() -> FastAPI:
             logger.warning("audit_trail: query failed: %s", exc)
             data = {"file_id": file_id, "changes": [], "events": []}
         return AuditTrailResponse(**data)
+
+    # ------------------------------------------------------------------
+    # POST /dashboard/api/recovery/files/{file_id}/open-folder
+    # ------------------------------------------------------------------
+    @app.post(
+        "/dashboard/api/recovery/files/{file_id}/open-folder",
+        response_model=OpenFolderResponse,
+        summary="Open the containing folder in the host OS file manager",
+        description=(
+            "Opens the folder containing the monitored file in the native file manager "
+            "(File Explorer on Windows, xdg-open on Linux, Finder on macOS). "
+            "Intended for local workstation deployments only. "
+            "The path is validated against configured recovery roots before opening."
+        ),
+    )
+    def open_folder(db: DbDep, file_id: int) -> OpenFolderResponse:
+        import platform
+        import subprocess
+
+        from pathoryx_enterprise.utils.path_validation import is_path_safe
+
+        snapshot = q.get_monitored_file(db, file_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="File not found in watched folders")
+
+        if not snapshot.file_path:
+            return OpenFolderResponse(opened=False, path=None, message="No file path recorded for this entry")
+
+        folder = Path(snapshot.file_path).parent
+
+        # Security: validate the folder is under a configured recovery root
+        try:
+            from pathoryx_enterprise.services.recovery_sentry.config import RecoverySentrySettings
+            rs = RecoverySentrySettings()
+            allowed_roots = rs.allowed_roots
+        except Exception:
+            allowed_roots = []
+
+        # Always allow the file's own parent directory if it is under data/ relative to CWD
+        cwd_data = Path("data").resolve()
+        if cwd_data.exists():
+            allowed_roots.append(cwd_data)
+
+        if not is_path_safe(folder, allowed_roots or [folder]):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Folder is outside configured recovery roots and cannot be opened",
+            )
+
+        if not folder.exists():
+            return OpenFolderResponse(
+                opened=False,
+                path=str(folder),
+                message="Folder no longer exists on disk",
+            )
+
+        try:
+            system = platform.system()
+            if system == "Windows":
+                import os as _os
+                _os.startfile(str(folder))
+            elif system == "Darwin":
+                subprocess.Popen(["open", str(folder)])
+            else:
+                # Linux — attempt xdg-open; graceful if not available (headless server)
+                result = subprocess.run(
+                    ["xdg-open", str(folder)],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if result.returncode != 0:
+                    return OpenFolderResponse(
+                        opened=False,
+                        path=str(folder),
+                        message=f"xdg-open returned exit code {result.returncode}. "
+                                "The dashboard backend may be running headless.",
+                    )
+            return OpenFolderResponse(opened=True, path=str(folder), message="Folder opened")
+        except FileNotFoundError:
+            return OpenFolderResponse(
+                opened=False,
+                path=str(folder),
+                message="No file manager available (xdg-open / open not found). "
+                        "Run the dashboard locally to use this feature.",
+            )
+        except Exception as exc:
+            logger.warning("open_folder: error opening %s: %s", folder, exc)
+            return OpenFolderResponse(opened=False, path=str(folder), message=str(exc))
 
     # ------------------------------------------------------------------
     # Phase 10 — Operational observability endpoints
@@ -1372,6 +1497,29 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Upload record not found")
         return UploadQueueItem(**result)
 
+    @app.patch(
+        "/dashboard/api/uploads/queue/{record_id}/priority",
+        response_model=UploadQueueItem,
+        summary="Update the priority of a queued upload record",
+    )
+    def upload_priority_update(
+        db: DbDep,
+        record_id: int,
+        body: UploadPriorityRequest,
+    ) -> UploadQueueItem:
+        if not (0 <= body.priority <= 9):
+            raise HTTPException(status_code=422, detail="Priority must be between 0 and 9")
+        try:
+            result = uq.update_upload_priority(db, record_id, body.priority)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.error("upload_priority_update: %s", exc)
+            raise HTTPException(status_code=500, detail="Priority update failed") from exc
+        if result is None:
+            raise HTTPException(status_code=404, detail="Upload record not found")
+        return UploadQueueItem(**result)
+
     @app.get(
         "/dashboard/api/operations/db-health",
         response_model=DbHealthResponse,
@@ -1400,6 +1548,125 @@ def create_app() -> FastAPI:
         return ServicesHealthResponse(
             runners=[RunnerItem.model_validate(r) for r in runners],
             stale_threshold_seconds=q.RUNNER_STALE_THRESHOLD_SECONDS,
+            as_of=datetime.now(tz=timezone.utc),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 4.4 — Computer Core analytics endpoints
+    # ------------------------------------------------------------------
+
+    from . import core_queries as cq
+
+    @app.get(
+        "/dashboard/api/core/overview",
+        response_model=CoreOverviewResponse,
+        summary="Computer Core — operational overview",
+    )
+    def core_overview(db: DbDep) -> CoreOverviewResponse:
+        try:
+            data = cq.get_core_overview(db)
+        except Exception as exc:
+            logger.warning("core_overview: query failed: %s", exc)
+            data = {
+                "total_slides": 0, "slides_today": 0, "uploaded_today": 0,
+                "failed_slides": 0, "active_uploads": 0, "queued_uploads": 0,
+                "delayed_uploads": 0, "recovery_backlog": 0, "unreviewed_changes": 0,
+                "total_bytes": 0, "status_counts": {}, "upload_status_counts": {},
+            }
+        return CoreOverviewResponse(**data, as_of=datetime.now(tz=timezone.utc))
+
+    @app.get(
+        "/dashboard/api/core/scanners",
+        response_model=ScannerActivityResponse,
+        summary="Computer Core — per-scanner activity",
+    )
+    def core_scanners(db: DbDep) -> ScannerActivityResponse:
+        fleet = _load_scanner_fleet()
+        try:
+            items = cq.get_scanner_activity(db, fleet)
+        except Exception as exc:
+            logger.warning("core_scanners: query failed: %s", exc)
+            items = []
+        return ScannerActivityResponse(
+            scanners=[ScannerActivityItem(**i) for i in items],
+            as_of=datetime.now(tz=timezone.utc),
+        )
+
+    @app.get(
+        "/dashboard/api/core/stains",
+        response_model=StainDistributionResponse,
+        summary="Computer Core — stain type distribution",
+    )
+    def core_stains(db: DbDep) -> StainDistributionResponse:
+        try:
+            items = cq.get_stain_distribution(db)
+        except Exception as exc:
+            logger.warning("core_stains: query failed: %s", exc)
+            items = []
+        total = sum(i["count"] for i in items)
+        return StainDistributionResponse(
+            items=[StainDistributionItem(**i) for i in items],
+            total=total,
+            as_of=datetime.now(tz=timezone.utc),
+        )
+
+    @app.get(
+        "/dashboard/api/core/recovery",
+        response_model=RecoveryStatsResponse,
+        summary="Computer Core — recovery matrix statistics",
+    )
+    def core_recovery(db: DbDep) -> RecoveryStatsResponse:
+        try:
+            data = cq.get_recovery_stats(db)
+        except Exception as exc:
+            logger.warning("core_recovery: query failed: %s", exc)
+            data = {
+                "total_monitored": 0, "failed_count": 0, "suspicious_count": 0,
+                "manual_review_count": 0, "auto_recovered": 0, "manual_review_required": 0,
+                "total_changes": 0, "total_resolved": 0, "recovery_rate": 0.0,
+                "recent_7d": 0, "by_folder": {}, "by_review_status": {}, "by_outcome": {},
+            }
+        return RecoveryStatsResponse(**data, as_of=datetime.now(tz=timezone.utc))
+
+    @app.get(
+        "/dashboard/api/core/storage",
+        response_model=StorageStatsResponse,
+        summary="Computer Core — storage analytics",
+    )
+    def core_storage(db: DbDep) -> StorageStatsResponse:
+        try:
+            data = cq.get_storage_stats(db)
+        except Exception as exc:
+            logger.warning("core_storage: query failed: %s", exc)
+            data = {
+                "total_slides_with_size": 0, "total_bytes": 0, "avg_bytes": 0,
+                "max_bytes": 0, "min_bytes": 0, "uploaded_today_bytes": 0, "by_scanner": [],
+            }
+        return StorageStatsResponse(
+            **{k: v for k, v in data.items() if k != "by_scanner"},
+            by_scanner=[StorageScannerItem(**s) for s in data.get("by_scanner", [])],
+            as_of=datetime.now(tz=timezone.utc),
+        )
+
+    @app.get(
+        "/dashboard/api/core/uploads",
+        response_model=UploadVelocityResponse,
+        summary="Computer Core — upload velocity and throughput",
+    )
+    def core_uploads(db: DbDep) -> UploadVelocityResponse:
+        try:
+            data = cq.get_upload_velocity(db)
+        except Exception as exc:
+            logger.warning("core_uploads: query failed: %s", exc)
+            data = {
+                "avg_speed_mbps": None, "avg_duration_seconds": None,
+                "total_in_queue": 0, "completed_total": 0, "failed_total": 0,
+                "total_retries": 0, "queue_depth": 0, "delayed_count": 0,
+                "daily_uploads_7d": [],
+            }
+        return UploadVelocityResponse(
+            **{k: v for k, v in data.items() if k != "daily_uploads_7d"},
+            daily_uploads_7d=[DailyUploadCount(**d) for d in data.get("daily_uploads_7d", [])],
             as_of=datetime.now(tz=timezone.utc),
         )
 

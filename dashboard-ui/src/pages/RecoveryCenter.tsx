@@ -1,5 +1,6 @@
-import { RefreshCcw, Search } from 'lucide-react'
+import { FolderOpen, RefreshCcw, Search } from 'lucide-react'
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorBanner } from '../components/ui/ErrorBanner'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -7,6 +8,7 @@ import { SkeletonRow } from '../components/ui/LoadingSpinner'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { TechnicianReviewDrawer } from '../components/ui/TechnicianReviewDrawer'
 import { TelemetryMetricRow } from '../components/ui/TelemetryMetricRow'
+import { postOpenFolder } from '../api/watchFolders'
 import { useMonitoredFiles } from '../hooks/useMonitoredFiles'
 import { useWatchFolders } from '../hooks/useWatchFolders'
 import type { MonitoredFileItem } from '../types/api'
@@ -39,6 +41,60 @@ const OUTCOME_LABEL: Record<string, string> = {
 // File row
 // ---------------------------------------------------------------------------
 
+function OpenFolderButton({ item }: { item: MonitoredFileItem }) {
+  const [toast, setToast] = useState<string | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: () => postOpenFolder(item.file_id),
+    onSuccess: (data) => {
+      if (!data.opened) {
+        setToast(data.message || 'Could not open folder')
+        setTimeout(() => setToast(null), 4000)
+      }
+    },
+    onError: () => {
+      setToast('Request failed')
+      setTimeout(() => setToast(null), 4000)
+    },
+  })
+
+  const disabled = !item.folder_exists || mutation.isPending
+  const tooltip = item.folder_path ?? 'Unknown path'
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => mutation.mutate()}
+        title={disabled && !item.folder_exists ? 'Folder no longer exists' : tooltip}
+        className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded"
+        style={{
+          color:      disabled ? 'var(--text-faint)' : 'var(--text-muted)',
+          border:     '1px solid var(--border-faint)',
+          background: 'transparent',
+          cursor:     disabled ? 'not-allowed' : 'pointer',
+          opacity:    disabled ? 0.5 : 1,
+        }}
+      >
+        <FolderOpen style={{ width: 11, height: 11, flexShrink: 0 }} aria-hidden />
+      </button>
+      {toast && (
+        <div
+          className="absolute bottom-full mb-1 left-0 text-[9px] px-2 py-1 rounded whitespace-nowrap z-50"
+          style={{
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--chart-rose)',
+          }}
+        >
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MonitoredFileRow({
   item,
   onReview,
@@ -60,16 +116,24 @@ function MonitoredFileRow({
       ? 'manual folder change detected'
       : 'awaiting technician'
 
+  // Subfolder context e.g. "failed / 2026-06-05" or "suspicious"
+  const locationLine = item.relative_folder_path
+    ? `${item.folder_label} / ${item.relative_folder_path}`
+    : item.folder_label
+
   return (
     <tr>
-      {/* Filename */}
+      {/* Filename + subfolder location */}
       <td>
         <span
           className="text-[11px] font-mono truncate block max-w-[200px]"
           style={{ color: 'var(--text-primary)' }}
-          title={item.filename}
+          title={item.file_path}
         >
           {item.filename}
+        </span>
+        <span className="text-[9px] font-mono block mt-0.5" style={{ color: 'var(--text-faint)' }}>
+          {locationLine}
         </span>
         {item.slide_id && (
           <span className="text-[9px] font-mono block mt-0.5" style={{ color: 'var(--text-faint)' }}>
@@ -136,20 +200,23 @@ function MonitoredFileRow({
         </span>
       </td>
 
-      {/* Action */}
+      {/* Actions */}
       <td>
-        <button
-          type="button"
-          onClick={() => onReview(item)}
-          className="text-[10px] px-2 py-0.5 rounded font-medium"
-          style={{
-            color:      'var(--accent)',
-            border:     '1px solid var(--border-default)',
-            background: 'var(--accent-faint)',
-          }}
-        >
-          Review
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onReview(item)}
+            className="text-[10px] px-2 py-0.5 rounded font-medium"
+            style={{
+              color:      'var(--accent)',
+              border:     '1px solid var(--border-default)',
+              background: 'var(--accent-faint)',
+            }}
+          >
+            Review
+          </button>
+          <OpenFolderButton item={item} />
+        </div>
       </td>
     </tr>
   )

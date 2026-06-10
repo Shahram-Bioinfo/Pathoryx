@@ -932,14 +932,14 @@ class BabelSharkStageRunner:
         from .core.label_extractor import (
             LabelExtractor,
             _load_openslide_after_dll_prep,
-            prepare_windows_dlls,
         )
         from .core import label_extractor as _le_mod
+        from pathoryx_enterprise.runtime.openslide_setup import configure_openslide_runtime
 
         if _le_mod.openslide is None:
+            # OPENSLIDE_DLL_PATH env var takes priority; config path is fallback.
             dll_path = (self.config.get("dll_paths") or {}).get("openslide_dll")
-            if dll_path:
-                prepare_windows_dlls(dll_path)
+            configure_openslide_runtime(dll_path)
             _le_mod.openslide = _load_openslide_after_dll_prep()
 
         extractor = LabelExtractor(

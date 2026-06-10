@@ -8,7 +8,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  CheckCircle, ChevronRight, Clock, ImageOff,
+  CheckCircle, ChevronRight, Clock, FolderOpen, ImageOff,
   Maximize2, Minimize2, RotateCcw, RotateCw, X, XCircle, ZoomIn, ZoomOut,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -16,6 +16,7 @@ import {
   fetchAuditTrail,
   fetchLabelPreview,
   patchReviewState,
+  postOpenFolder,
   postTechnicianRename,
   postValidateFilename,
 } from '../../api/watchFolders'
@@ -1175,6 +1176,71 @@ function ConfirmRenameDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Sub-component: open-folder button used inside the drawer header
+// ---------------------------------------------------------------------------
+
+function OpenFolderDrawerButton({ file }: { file: MonitoredFileItem }) {
+  const [toast, setToast] = useState<string | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: () => postOpenFolder(file.file_id),
+    onSuccess: (data) => {
+      if (!data.opened) {
+        setToast(data.message || 'Could not open folder')
+        setTimeout(() => setToast(null), 4000)
+      }
+    },
+    onError: () => {
+      setToast('Request failed')
+      setTimeout(() => setToast(null), 4000)
+    },
+  })
+
+  const disabled = !(file.folder_exists ?? true) || mutation.isPending
+  const locationHint = file.relative_folder_path
+    ? `${file.folder_label} / ${file.relative_folder_path}`
+    : (file.folder_path ?? file.folder_label)
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => mutation.mutate()}
+        title={disabled && !(file.folder_exists ?? true)
+          ? 'Folder no longer exists on disk'
+          : `Open folder: ${locationHint}`}
+        className="flex items-center gap-1 px-2 py-1 rounded text-[10px]"
+        style={{
+          color:      disabled ? 'var(--text-faint)' : 'var(--text-muted)',
+          border:     '1px solid var(--border-faint)',
+          background: 'transparent',
+          cursor:     disabled ? 'not-allowed' : 'pointer',
+          opacity:    disabled ? 0.5 : 1,
+        }}
+      >
+        <FolderOpen style={{ width: 12, height: 12 }} aria-hidden />
+        <span>Open Folder</span>
+      </button>
+      {toast && (
+        <div
+          className="absolute top-full mt-1 right-0 text-[9px] px-2 py-1.5 rounded whitespace-nowrap z-50"
+          style={{
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--chart-rose)',
+            maxWidth: 280,
+            whiteSpace: 'normal',
+          }}
+        >
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main drawer
 // ---------------------------------------------------------------------------
 
@@ -1303,10 +1369,13 @@ export function TechnicianReviewDrawer({ file, onClose }: Props) {
               )}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex-shrink-0 p-1 rounded mt-0.5"
-            style={{ color: 'var(--text-faint)' }} aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+            <OpenFolderDrawerButton file={file} />
+            <button type="button" onClick={onClose} className="p-1 rounded"
+              style={{ color: 'var(--text-faint)' }} aria-label="Close">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Review state actions */}

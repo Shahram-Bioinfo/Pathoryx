@@ -1,18 +1,19 @@
 import {
   Activity, AlertTriangle, CloudUpload, FlaskConical,
-  Layers, LayoutDashboard, RefreshCcw, ShieldCheck,
+  Layers, LayoutDashboard, MonitorPlay, RefreshCcw, ShieldCheck,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { LiveIndicator } from '../ui/LiveIndicator'
 
 const NAV = [
-  { to: '/',           label: 'Overview',         icon: LayoutDashboard },
-  { to: '/slides',     label: 'Slide Explorer',   icon: Layers          },
-  { to: '/queues',     label: 'Queue Monitor',    icon: Activity        },
-  { to: '/failures',   label: 'Failure Center',   icon: AlertTriangle   },
-  { to: '/recovery',   label: 'Recovery Center',  icon: RefreshCcw      },
-  { to: '/operations', label: 'Operations',       icon: ShieldCheck     },
-  { to: '/uploads',    label: 'Upload Operations', icon: CloudUpload    },
+  { to: '/',              label: 'Overview',         icon: LayoutDashboard },
+  { to: '/slides',        label: 'Slide Explorer',   icon: Layers          },
+  { to: '/queues',        label: 'Queue Monitor',    icon: Activity        },
+  { to: '/failures',      label: 'Failure Center',   icon: AlertTriangle   },
+  { to: '/recovery',      label: 'Recovery Center',  icon: RefreshCcw      },
+  { to: '/operations',    label: 'Operations',       icon: ShieldCheck     },
+  { to: '/uploads',       label: 'Upload Operations', icon: CloudUpload    },
+  { to: '/computer-core', label: 'Computer Core',    icon: MonitorPlay     },
 ]
 
 export function Sidebar() {
