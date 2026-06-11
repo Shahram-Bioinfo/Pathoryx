@@ -1127,3 +1127,73 @@ class RoutingDecisionsResponse(BaseModel):
     total: int
     stats: dict[str, Any]
     as_of: datetime
+
+
+# ---------------------------------------------------------------------------
+# Wallboard
+# ---------------------------------------------------------------------------
+
+
+class WallboardKPIs(BaseModel):
+    uploaded_today: int
+    slides_scanned_today: int
+    queue_depth: int
+    active_processing: int
+    failed: int
+    recovery_backlog: int
+    avg_slides_per_hour: float = 0.0
+
+
+class WallboardScannerItem(BaseModel):
+    scanner_id: str
+    display_name: str
+    role: str
+    role_color: str
+    operational_state: str
+    slides_today: int
+    uploaded_today: int
+    last_activity: Optional[datetime] = None
+    destination: Optional[str] = None
+
+
+class WallboardUploadByHour(BaseModel):
+    hour: int
+    hour_label: str
+    count: int
+
+
+class WallboardStainItem(BaseModel):
+    stain: str
+    count: int
+    percentage: float
+
+
+class WallboardPipelineStage(BaseModel):
+    name: str
+    label: str
+    active: int
+    today: int
+    failed: int
+
+
+class WallboardAlert(BaseModel):
+    level: str
+    message: str
+
+
+class WallboardResponse(BaseModel):
+    as_of: datetime
+    operational_day_start: datetime
+    operational_day_end: datetime
+    active_mode: Optional[str] = None
+    system_status: str
+    kpis: WallboardKPIs
+    scanners: list[WallboardScannerItem]
+    uploads_by_hour: list[WallboardUploadByHour]
+    uploaded_by_scanner: list[dict[str, Any]]
+    stain_distribution: list[WallboardStainItem]
+    pipeline: list[WallboardPipelineStage]
+    alerts: list[WallboardAlert]
+    next_mode_switch_at: Optional[str] = None
+    next_mode_name: Optional[str] = None
+    peak_upload_hour: Optional[str] = None

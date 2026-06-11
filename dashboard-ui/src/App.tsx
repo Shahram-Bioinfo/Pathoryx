@@ -13,6 +13,7 @@ import { SlideDetail } from './pages/SlideDetail'
 import { SlideExplorer } from './pages/SlideExplorer'
 import { UploadOperations } from './pages/UploadOperations'
 import { RoutingControlCenter } from './pages/RoutingControlCenter'
+import { Wallboard } from './pages/Wallboard'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,8 +30,9 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Routes>
-            {/* Shell-free immersive route — renders without sidebar/topbar */}
+            {/* Shell-free immersive routes — render without sidebar/topbar */}
             <Route path="/computer-core/fullscreen" element={<ComputerCoreFullscreen />} />
+            <Route path="/wallboard" element={<Wallboard />} />
 
             {/* All other routes wrapped in Shell */}
             <Route

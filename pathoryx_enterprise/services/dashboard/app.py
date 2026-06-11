@@ -114,6 +114,14 @@ from .schemas import (
     RoutingPreviewItem,
     RoutingPreviewResponse,
     RoutingStatusResponse,
+    # Wallboard
+    WallboardAlert,
+    WallboardKPIs,
+    WallboardPipelineStage,
+    WallboardResponse,
+    WallboardScannerItem,
+    WallboardStainItem,
+    WallboardUploadByHour,
 )
 
 logger = logging.getLogger(__name__)
@@ -2046,6 +2054,63 @@ def create_app() -> FastAPI:
             dry_run=dec.get("dry_run", True),
             chain=chain,
             as_of=now,
+        )
+
+    # ------------------------------------------------------------------
+    # Wallboard — single compact payload for the live laboratory display
+    # ------------------------------------------------------------------
+
+    @app.get(
+        "/dashboard/api/wallboard",
+        response_model=WallboardResponse,
+        summary="Live wallboard — compact operational payload for the laboratory display",
+    )
+    def wallboard(db: DbDep) -> WallboardResponse:
+        from . import wallboard_queries as wq
+
+        fleet = _load_scanner_fleet()
+        cfg   = _load_babelshark_config()
+
+        try:
+            data = wq.get_wallboard_data(db, fleet, cfg)
+        except Exception as exc:
+            logger.warning("wallboard: query failed: %s", exc)
+            op_start = wq.get_operational_day_start()
+            return WallboardResponse(
+                as_of=datetime.now(tz=timezone.utc),
+                operational_day_start=op_start,
+                operational_day_end=op_start + timedelta(hours=24),
+                active_mode=None,
+                system_status="degraded",
+                kpis=WallboardKPIs(
+                    uploaded_today=0, slides_scanned_today=0,
+                    queue_depth=0, active_processing=0, failed=0, recovery_backlog=0,
+                    avg_slides_per_hour=0.0,
+                ),
+                scanners=[],
+                uploads_by_hour=[],
+                uploaded_by_scanner=[],
+                stain_distribution=[],
+                pipeline=[],
+                alerts=[WallboardAlert(level="critical", message="Wallboard data unavailable")],
+            )
+
+        return WallboardResponse(
+            as_of=datetime.fromisoformat(data["as_of"]),
+            operational_day_start=datetime.fromisoformat(data["operational_day_start"]),
+            operational_day_end=datetime.fromisoformat(data["operational_day_end"]),
+            active_mode=data.get("active_mode"),
+            system_status=data["system_status"],
+            kpis=WallboardKPIs(**data["kpis"]),
+            scanners=[WallboardScannerItem(**s) for s in data["scanners"]],
+            uploads_by_hour=[WallboardUploadByHour(**h) for h in data["uploads_by_hour"]],
+            uploaded_by_scanner=data["uploaded_by_scanner"],
+            stain_distribution=[WallboardStainItem(**s) for s in data["stain_distribution"]],
+            pipeline=[WallboardPipelineStage(**p) for p in data["pipeline"]],
+            alerts=[WallboardAlert(**a) for a in data["alerts"]],
+            next_mode_switch_at=data.get("next_mode_switch_at"),
+            next_mode_name=data.get("next_mode_name"),
+            peak_upload_hour=data.get("peak_upload_hour"),
         )
 
     return app

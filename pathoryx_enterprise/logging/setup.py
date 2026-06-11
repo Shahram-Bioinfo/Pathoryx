@@ -20,6 +20,9 @@ Usage::
         json_output=True,
     )
 
+    # Attach rotating file handler (call once, right after configure_logging):
+    log_file = add_file_handler("qc", log_dir="data/logs")
+
     # Per-task context (call at start of each slide/trigger):
     inject_context(
         correlation_id="abc-123",
@@ -37,6 +40,8 @@ from __future__ import annotations
 import logging
 import sys
 from contextvars import ContextVar
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any, Optional
 
 import structlog
@@ -116,6 +121,53 @@ def configure_logging(
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+
+def add_file_handler(
+    service_name: str,
+    log_dir: str | None = None,
+    max_bytes: int = 10 * 1024 * 1024,
+    backup_count: int = 7,
+) -> Path:
+    """
+    Attach a RotatingFileHandler to the stdlib root logger.
+
+    Because structlog is configured with LoggerFactory() (stdlib), every
+    structlog log line already flows through stdlib logging.  Adding a handler
+    here captures all output — both structlog and plain logging.getLogger() —
+    without touching the structlog pipeline.
+
+    Call once, immediately after configure_logging().  Returns the absolute
+    Path of the log file so callers can store it in audit records
+    (e.g. dimse_evidence["log_file"] in upload_results.response_summary).
+
+    Args:
+        service_name:  Used to derive the log filename.
+                       e.g. "upload" → data/logs/upload.log
+        log_dir:       Directory for log files.
+                       Defaults to PATHORYX_LOG_DIR env var or "data/logs".
+        max_bytes:     Rotate when the file reaches this size.  Default 10 MB.
+        backup_count:  Number of rotated files to retain.  Default 7.
+
+    Returns:
+        The resolved Path of the log file.
+    """
+    import os
+    resolved_dir = Path(log_dir or os.environ.get("PATHORYX_LOG_DIR", "data/logs"))
+    resolved_dir.mkdir(parents=True, exist_ok=True)
+    log_path = resolved_dir / f"{service_name}.log"
+
+    handler = RotatingFileHandler(
+        filename=str(log_path),
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    # Same format as stdout — structlog already rendered the message as JSON.
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setLevel(logging.root.level)
+    logging.root.addHandler(handler)
+    return log_path.resolve()
 
 
 def _inject_service_context(

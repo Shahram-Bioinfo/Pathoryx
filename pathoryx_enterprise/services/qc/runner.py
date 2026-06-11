@@ -51,7 +51,7 @@ from pathoryx_enterprise.db.models.core import FileRecord, ServiceTrigger
 from pathoryx_enterprise.db.repositories.runner_registry import RunnerRegistryRepository
 from pathoryx_enterprise.db.repositories.trigger import TriggerRepository
 from pathoryx_enterprise.db.session import get_session
-from pathoryx_enterprise.logging.setup import configure_logging, inject_context
+from pathoryx_enterprise.logging.setup import add_file_handler, configure_logging, inject_context
 from pathoryx_enterprise.monitoring.health import (
     build_health_probe,
     build_readiness_probe,
@@ -351,6 +351,7 @@ def run(settings: QCSettings) -> None:
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         json_output=settings.environment != "development",
     )
+    add_file_handler("qc", log_dir=os.environ.get("PATHORYX_LOG_DIR", "data/logs"))
     setup_tracing(SERVICE_NAME, settings.service_version)
 
     runner_id = deterministic_artifact_id(SERVICE_NAME, settings.environment, "runner")

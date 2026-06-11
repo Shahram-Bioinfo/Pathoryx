@@ -9,6 +9,8 @@ Environment:
     PATHORYX_SERVICES   — comma-separated list of services to start.
                           Defaults to all: babelshark,qc,dicom,upload,recovery_sentry
                           'failed_watcher' is a backward-compat alias for recovery_sentry.
+    PATHORYX_LOG_DIR    — directory for rotating log files (default: data/logs).
+                          orchestrator.log is written here.
     All DATABASE_URL, BABELSHARK_CONFIG, QC_SERVICE_CONFIG, DICOM_CONFIG env vars
     must be set before launching.
 """
@@ -19,6 +21,7 @@ import sys
 
 import structlog
 
+from pathoryx_enterprise.logging.setup import add_file_handler, configure_logging
 from pathoryx_enterprise.orchestrator.supervisor import ProcessSupervisor, ServiceSpec
 
 logger = structlog.get_logger(__name__)
@@ -96,6 +99,13 @@ _ALL_SERVICES = {
 
 
 def main() -> None:
+    configure_logging(
+        service_name="orchestrator",
+        log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        json_output=True,
+    )
+    add_file_handler("orchestrator", log_dir=os.environ.get("PATHORYX_LOG_DIR", "data/logs"))
+
     _log_runtime_env()
 
     # Default service list excludes the 'failed_watcher' alias to avoid duplication

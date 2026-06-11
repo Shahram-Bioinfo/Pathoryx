@@ -2,6 +2,38 @@
 Uploader service DB writer.
 
 Records upload outcomes, updates FileRecord status, appends to EventStore.
+
+Changes vs original:
+  record_upload_success() now accepts dimse_evidence: dict | None and stores it
+  in UploadResult.response_summary (JSONB column).  This provides permanent,
+  queryable proof of what the PACS returned.
+
+  Example response_summary for a live upload:
+    {
+      "dry_run": false,
+      "pacs_host": "path-pacs2",
+      "pacs_port": 32001,
+      "remote_ae": "DICOM_STORAGE",
+      "local_ae": "DICOM_STORAGE",
+      "cstore_bin": "storescu",
+      "batches_sent": 1,
+      "dcm_file_count": 47,
+      "dimse_statuses": ["0x0000", "0x0000", ...],
+      "all_ok": true
+    }
+
+  Example response_summary for a dry-run upload:
+    {
+      "dry_run": true,
+      "pacs_host": "path-pacs2",
+      ...
+    }
+
+Invariants preserved from original:
+  - Idempotency: insert is guarded by idempotency_key unique constraint.
+  - upload_status = 'uploaded' is only written after the caller (runner.py) has
+    confirmed DIMSE success — the DB writer is not responsible for that check.
+  - EventStore append is unconditional (append-only; no UPDATE/DELETE).
 """
 from __future__ import annotations
 
@@ -38,9 +70,7 @@ class UploaderDBWriter:
         self._trigger_repo = TriggerRepository(session)
         self._event_repo = EventStoreRepository(session)
 
-    # ------------------------------------------------------------------
-    # Upload queue sync helpers
-    # ------------------------------------------------------------------
+    # ── Upload queue sync helpers ─────────────────────────────────────────────
 
     def _sync_upload_queue(
         self,
@@ -55,7 +85,7 @@ class UploaderDBWriter:
         retry_count: int = 0,
         host_id: str | None = None,
     ) -> None:
-        """Upsert one row in estimated_upload_queue to reflect current upload lifecycle state."""
+        """Upsert one row in estimated_upload_queue to reflect current upload state."""
         filename = ""
         scanner_id = None
         file_size = None
@@ -99,7 +129,7 @@ class UploaderDBWriter:
                 constraint="uq_euq_filename_queued_at",
                 set_={
                     "upload_status":       ins.excluded.upload_status,
-                    # Preserve actual start time set by record_upload_started()
+                    # Preserve the actual start time set by record_upload_started().
                     "upload_started_at":   func.coalesce(
                         EstimatedUploadQueue.upload_started_at,
                         ins.excluded.upload_started_at,
@@ -128,7 +158,9 @@ class UploaderDBWriter:
     ) -> None:
         """Mark upload as in-progress in estimated_upload_queue (best-effort)."""
         file_record = self._session.execute(
-            select(FileRecord).where(FileRecord.internal_id == trigger.file_record_internal_id)
+            select(FileRecord).where(
+                FileRecord.internal_id == trigger.file_record_internal_id
+            )
         ).scalar_one_or_none()
         self._sync_upload_queue(
             trigger=trigger,
@@ -142,7 +174,7 @@ class UploaderDBWriter:
         self,
         *,
         trigger: ServiceTrigger,
-        upload_method: str = "filesystem",
+        upload_method: str = "storescu",
         destination_path: str | None = None,
         file_size: int | None = None,
         duration_seconds: float | None = None,
@@ -152,11 +184,23 @@ class UploaderDBWriter:
         host_id: str | None = None,
         service_version: str | None = None,
         retry_count: int = 0,
+        dimse_evidence: dict | None = None,
     ) -> None:
+        """
+        Persist a confirmed successful upload to PostgreSQL.
+
+        Called ONLY after the runner has verified DIMSE success (or dry-run).
+        Writes:
+          1. uploader.upload_results  — one row with full DIMSE evidence in response_summary.
+          2. core.file_records.status → 'uploaded'.
+          3. core.service_trigger     → completed.
+          4. events.pipeline_events   → file.uploaded event.
+          5. upload_tracking.estimated_upload_queue → upload_status='uploaded'.
+        """
         file_record_id = trigger.file_record_internal_id
         artifact_id = global_artifact_id or trigger.global_artifact_id
 
-        # 1. Persist uploader result
+        # 1. Persist upload result — idempotent
         idempotency_key = deterministic_artifact_id(
             "upload_result", str(trigger.internal_id), "success"
         )
@@ -181,6 +225,10 @@ class UploaderDBWriter:
                 host_id=host_id,
                 service_version=service_version,
                 processed_at=utc_now(),
+                # DIMSE evidence stored here for permanent auditability.
+                # Query example:
+                #   SELECT response_summary->>'dimse_statuses' FROM uploader.upload_results;
+                response_summary=dimse_evidence,
             )
             self._session.add(result_row)
             self._session.flush()
@@ -203,9 +251,10 @@ class UploaderDBWriter:
             aggregate_id=artifact_id or str(file_record_id or ""),
             service_name=SERVICE_NAME,
             event_payload={
-                "upload_method": upload_method,
+                "upload_method":    upload_method,
                 "destination_path": destination_path,
                 "duration_seconds": duration_seconds,
+                "dimse_evidence":   dimse_evidence,
             },
             file_record_internal_id=file_record_id,
             global_artifact_id=artifact_id,
@@ -216,7 +265,7 @@ class UploaderDBWriter:
             correlation_id=correlation_id,
         )
 
-        # Sync to upload queue for dashboard visibility
+        # 5. Sync to upload queue for dashboard visibility
         speed_mbps: float | None = None
         if file_size and duration_seconds and duration_seconds > 0:
             speed_mbps = (file_size / (1024 * 1024)) / duration_seconds
@@ -273,7 +322,6 @@ class UploaderDBWriter:
             correlation_id=correlation_id,
         )
 
-        # Sync to upload queue for dashboard visibility
         self._sync_upload_queue(
             trigger=trigger,
             file_record=record,

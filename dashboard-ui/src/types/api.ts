@@ -988,3 +988,73 @@ export interface DecisionChainResponse {
   chain: DecisionChainStep[]
   as_of: string
 }
+
+
+// ---------------------------------------------------------------------------
+// Wallboard
+// ---------------------------------------------------------------------------
+
+export interface WallboardKPIs {
+  uploaded_today: number
+  slides_scanned_today: number
+  queue_depth: number
+  active_processing: number
+  failed: number
+  recovery_backlog: number
+  avg_slides_per_hour: number
+}
+
+export interface WallboardScannerItem {
+  scanner_id: string
+  display_name: string
+  role: string
+  role_color: string
+  operational_state: string
+  slides_today: number
+  uploaded_today: number
+  last_activity: string | null
+  destination: string | null
+}
+
+export interface WallboardUploadByHour {
+  hour: number
+  hour_label: string
+  count: number
+}
+
+export interface WallboardStainItem {
+  stain: string
+  count: number
+  percentage: number
+}
+
+export interface WallboardPipelineStage {
+  name: string
+  label: string
+  active: number
+  today: number
+  failed: number
+}
+
+export interface WallboardAlert {
+  level: string
+  message: string
+}
+
+export interface WallboardResponse {
+  as_of: string
+  operational_day_start: string
+  operational_day_end: string
+  active_mode: string | null
+  system_status: string
+  kpis: WallboardKPIs
+  scanners: WallboardScannerItem[]
+  uploads_by_hour: WallboardUploadByHour[]
+  uploaded_by_scanner: { scanner_id: string; count: number }[]
+  stain_distribution: WallboardStainItem[]
+  pipeline: WallboardPipelineStage[]
+  alerts: WallboardAlert[]
+  next_mode_switch_at: string | null
+  next_mode_name: string | null
+  peak_upload_hour: string | null
+}
