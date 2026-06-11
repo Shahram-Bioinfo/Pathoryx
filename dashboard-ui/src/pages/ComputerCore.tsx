@@ -12,6 +12,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+  AreaChart, Area, XAxis, RadialBarChart, RadialBar,
+} from 'recharts'
+import {
   useCoreOverview,
   useCoreRecovery,
   useCoreScanners,
@@ -24,6 +28,7 @@ import type {
   StainDistributionItem,
   StorageScannerItem,
 } from '../types/api'
+import { useTheme } from '../components/layout/ThemeProvider'
 
 // ── Utility formatters ──────────────────────────────────────────────────────
 
@@ -745,11 +750,438 @@ function StorageScannerRow({
   )
 }
 
+// ── Modern-mode layout ───────────────────────────────────────────────────────
+// Used when theme === 'modern'. Shows the same data in standard mission-cards.
+
+// ── Modern Computer Core chart helpers ──────────────────────────────────────
+
+const DONUT_COLORS = ['#22D3EE', '#818CF8', '#C084FC', '#2DD4BF', '#FB7185', '#FCD34D']
+
+function ModernStatCard({
+  label, value, color, accent, blink,
+}: {
+  label: string; value: string; color?: string; accent?: string; blink?: boolean
+}) {
+  return (
+    <div className="mission-card" style={{ padding: '18px 20px', position: 'relative', overflow: 'hidden' }}>
+      {accent && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+          background: accent,
+          borderRadius: '8px 8px 0 0',
+        }} />
+      )}
+      <div style={{
+        fontSize: 36, fontWeight: 800, lineHeight: 1,
+        fontFamily: '"JetBrains Mono", monospace',
+        color: color ?? 'var(--text-primary)',
+        letterSpacing: '-0.02em',
+      }}>
+        {value}
+      </div>
+      <div style={{
+        fontSize: 10, marginTop: 8, textTransform: 'uppercase',
+        letterSpacing: '0.16em', fontWeight: 600,
+        color: 'var(--text-muted)',
+        display: 'flex', alignItems: 'center', gap: 6,
+      }}>
+        {blink && (
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+            background: color ?? 'var(--text-muted)',
+            display: 'inline-block',
+            animation: 'lcBlink 2s ease-in-out infinite',
+          }} />
+        )}
+        {label}
+      </div>
+    </div>
+  )
+}
+
+function ComputerCoreModern() {
+  const navigate = useNavigate()
+  const { data: overview, isLoading: ovLoading } = useCoreOverview()
+  const { data: scanners } = useCoreScanners()
+  const { data: recovery } = useCoreRecovery()
+  const { data: uploads  } = useCoreUploads()
+  const { data: stains   } = useCoreStains()
+  const { data: storage  } = useCoreStorage()
+
+  // Build donut data from status_counts
+  const donutData = Object.entries(overview?.status_counts ?? {}).map(([status, count], i) => ({
+    name: status.replace(/_/g, ' '),
+    value: count,
+    color: DONUT_COLORS[i % DONUT_COLORS.length],
+  })).filter(d => d.value > 0).slice(0, 6)
+
+  // Build recovery radial data
+  const recoveryRate = recovery?.recovery_rate ?? 0
+  const radialData = [{ name: 'Recovery', value: recoveryRate, fill: '#22D3EE' }]
+
+  // Build upload sparkline from daily data
+  const sparkData = (uploads?.daily_uploads_7d ?? []).slice(-7).map((d, i) => ({
+    i, v: d.count ?? 0,
+  }))
+
+  // Build stain donut
+  const stainDonut = (stains?.items ?? []).slice(0, 6).map((d, i) => ({
+    name: d.stain_type,
+    value: d.count,
+    color: DONUT_COLORS[i % DONUT_COLORS.length],
+  }))
+
+  return (
+    <div className="space-y-6">
+      {/* Page header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 style={{
+            fontSize: 22, fontWeight: 800, letterSpacing: '0.06em',
+            color: 'var(--text-primary)', textTransform: 'uppercase',
+            fontFamily: "'Inter', sans-serif",
+          }}>
+            Computer Core
+          </h1>
+          <p style={{ fontSize: 11, marginTop: 4, color: 'var(--text-muted)', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+            Operational Data Systems — Pipeline Analytics Console
+          </p>
+        </div>
+        <button className="btn-ghost-ops" onClick={() => navigate('/computer-core/fullscreen')}>
+          Fullscreen
+        </button>
+      </div>
+
+      {/* Primary KPI row — large numbers */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+        <ModernStatCard
+          label="Total Slides"
+          value={ovLoading ? '—' : fmtNum(overview?.total_slides)}
+          accent="var(--chart-cyan)"
+        />
+        <ModernStatCard
+          label="Uploaded Today"
+          value={ovLoading ? '—' : fmtNum(overview?.uploaded_today)}
+          color="var(--chart-emerald)"
+          accent="var(--chart-emerald)"
+        />
+        <ModernStatCard
+          label="Active"
+          value={ovLoading ? '—' : fmtNum(overview?.active_uploads)}
+          color={overview?.active_uploads ? 'var(--chart-cyan)' : undefined}
+          accent="var(--chart-cyan)"
+          blink={!!(overview?.active_uploads)}
+        />
+        <ModernStatCard
+          label="Queued"
+          value={ovLoading ? '—' : fmtNum(overview?.queued_uploads)}
+          color={overview?.queued_uploads ? 'var(--chart-amber)' : undefined}
+          accent="var(--chart-amber)"
+        />
+        <ModernStatCard
+          label="Failed"
+          value={ovLoading ? '—' : fmtNum(overview?.failed_slides)}
+          color={overview?.failed_slides ? 'var(--chart-rose)' : undefined}
+          accent={overview?.failed_slides ? 'var(--chart-rose)' : 'var(--border-faint)'}
+          blink={!!(overview?.failed_slides)}
+        />
+        <ModernStatCard
+          label="Recovery"
+          value={ovLoading ? '—' : fmtNum(overview?.recovery_backlog)}
+          color={overview?.recovery_backlog ? 'var(--chart-amber)' : undefined}
+          accent={overview?.recovery_backlog ? 'var(--chart-amber)' : 'var(--border-faint)'}
+        />
+      </div>
+
+      {/* Main section grid */}
+      <div className="grid gap-5" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+
+        {/* Pipeline Distribution — Donut */}
+        <div className="mission-card p-5">
+          <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--accent)', marginBottom: 16 }}>
+            Pipeline Distribution
+          </h3>
+          {donutData.length > 0 ? (
+            <div className="flex items-center gap-4">
+              <ResponsiveContainer width={100} height={100}>
+                <PieChart>
+                  <Pie data={donutData} dataKey="value" cx="50%" cy="50%" innerRadius={28} outerRadius={46} strokeWidth={0}>
+                    {donutData.map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ background: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 6, fontSize: 11 }}
+                    itemStyle={{ color: 'var(--tooltip-text)' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex-1 space-y-1.5 min-w-0">
+                {donutData.map(d => (
+                  <div key={d.name} className="flex items-center gap-2">
+                    <span style={{ width: 6, height: 6, borderRadius: 2, flexShrink: 0, background: d.color, display: 'inline-block' }} />
+                    <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'capitalize', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: '"JetBrains Mono", monospace' }}>{d.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p style={{ fontSize: 11, color: 'var(--text-faint)' }}>No pipeline data</p>
+          )}
+        </div>
+
+        {/* QC / Stain Donut */}
+        <div className="mission-card p-5">
+          <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--chart-violet)', marginBottom: 16 }}>
+            Stain Distribution
+          </h3>
+          {stainDonut.length > 0 ? (
+            <div className="flex items-center gap-4">
+              <ResponsiveContainer width={100} height={100}>
+                <PieChart>
+                  <Pie data={stainDonut} dataKey="value" cx="50%" cy="50%" innerRadius={28} outerRadius={46} strokeWidth={0}>
+                    {stainDonut.map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ background: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 6, fontSize: 11 }}
+                    itemStyle={{ color: 'var(--tooltip-text)' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex-1 space-y-1.5 min-w-0">
+                {stainDonut.map(d => (
+                  <div key={d.name} className="flex items-center gap-2">
+                    <span style={{ width: 6, height: 6, borderRadius: 2, flexShrink: 0, background: d.color, display: 'inline-block' }} />
+                    <span style={{ fontSize: 10, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: '"JetBrains Mono", monospace' }}>{d.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(stains?.items ?? []).slice(0, 5).map(d => (
+                <div key={d.stain_type}>
+                  <div className="flex justify-between mb-0.5">
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{d.stain_type}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: '"JetBrains Mono", monospace' }}>{d.count}</span>
+                  </div>
+                  <div style={{ height: 3, borderRadius: 2, overflow: 'hidden', background: 'var(--surface-1)' }}>
+                    <div style={{ height: '100%', width: `${d.percentage ?? 0}%`, background: 'var(--chart-violet)', transition: 'width 500ms ease' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Recovery — Radial gauge */}
+        <div className="mission-card p-5">
+          <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--chart-rose)', marginBottom: 16 }}>
+            Recovery Rate
+          </h3>
+          <div className="flex items-center gap-5">
+            <div style={{ position: 'relative', width: 100, height: 100, flexShrink: 0 }}>
+              <ResponsiveContainer width={100} height={100}>
+                <RadialBarChart innerRadius={28} outerRadius={46} data={radialData} startAngle={225} endAngle={-45}>
+                  <RadialBar dataKey="value" background={{ fill: 'var(--surface-1)' }} cornerRadius={4} />
+                </RadialBarChart>
+              </ResponsiveContainer>
+              <div style={{
+                position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--chart-cyan)', fontFamily: '"JetBrains Mono", monospace', lineHeight: 1 }}>
+                  {recoveryRate.toFixed(0)}%
+                </span>
+              </div>
+            </div>
+            <div className="flex-1 space-y-2">
+              {[
+                { label: 'Monitored',  value: fmtNum(recovery?.total_monitored) },
+                { label: 'Auto-fixed', value: fmtNum(recovery?.auto_recovered) },
+                { label: 'Manual',     value: fmtNum(recovery?.manual_review_required) },
+                { label: 'Resolved',   value: fmtNum(recovery?.total_resolved) },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex justify-between">
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: '"JetBrains Mono", monospace' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Second row: Scanner Fleet + Upload Velocity */}
+      <div className="grid gap-5" style={{ gridTemplateColumns: '1fr 1fr' }}>
+
+        {/* Scanner Fleet */}
+        <div className="mission-card p-5">
+          <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--chart-cyan)', marginBottom: 16 }}>
+            Scanner Fleet
+          </h3>
+          {(scanners?.scanners ?? []).length === 0 ? (
+            <p style={{ fontSize: 11, color: 'var(--text-faint)' }}>No scanner data</p>
+          ) : (
+            <div className="space-y-3">
+              {(scanners?.scanners ?? []).slice(0, 6).map(s => {
+                const isActive = s.operational_state === 'active'
+                return (
+                  <div key={s.scanner_id}>
+                    <div className="flex items-center justify-between mb-1.5 gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span style={{
+                          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                          background: isActive ? 'var(--chart-emerald)' : 'var(--chart-slate)',
+                          boxShadow: isActive ? '0 0 6px var(--chart-emerald)' : 'none',
+                          animation: isActive ? 'lcBlink 2.2s ease-in-out infinite' : 'none',
+                          display: 'inline-block',
+                        }} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {s.scanner_id}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: '"JetBrains Mono", monospace', flexShrink: 0 }}>
+                        {fmtNum(s.total_slides)}
+                      </span>
+                    </div>
+                    <div style={{ height: 3, borderRadius: 2, overflow: 'hidden', background: 'var(--surface-1)' }}>
+                      <div style={{
+                        height: '100%',
+                        width: `${scanners?.scanners?.length ? Math.min((s.total_slides / Math.max(...(scanners.scanners.map(x => x.total_slides)), 1)) * 100, 100) : 0}%`,
+                        background: isActive ? 'var(--chart-emerald)' : 'var(--chart-slate)',
+                        transition: 'width 600ms ease',
+                      }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Upload Velocity — sparkline */}
+        <div className="mission-card p-5">
+          <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--chart-teal)', marginBottom: 16 }}>
+            Upload Velocity
+          </h3>
+          {sparkData.length > 1 ? (
+            <>
+              <ResponsiveContainer width="100%" height={80}>
+                <AreaChart data={sparkData} margin={{ top: 2, right: 4, left: 0, bottom: 2 }}>
+                  <defs>
+                    <linearGradient id="uploadGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2DD4BF" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#2DD4BF" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="i" hide />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 6, fontSize: 10 }}
+                    itemStyle={{ color: 'var(--chart-teal)' }}
+                    formatter={(v: number) => [v, 'Uploads']}
+                  />
+                  <Area type="monotone" dataKey="v" stroke="#2DD4BF" strokeWidth={2} fill="url(#uploadGrad)" dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+              <div className="mt-3 space-y-1.5">
+                {[
+                  { label: 'Completed total', value: fmtNum(uploads?.completed_total) },
+                  { label: 'Queue depth',     value: fmtNum(uploads?.queue_depth) },
+                  { label: 'Delayed',         value: fmtNum(uploads?.delayed_count) },
+                  { label: 'Avg speed',       value: uploads?.avg_speed_mbps != null ? `${uploads.avg_speed_mbps} Mb/s` : '—' },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between">
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', fontFamily: '"JetBrains Mono", monospace' }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              {[
+                { label: 'Completed total', value: fmtNum(uploads?.completed_total) },
+                { label: 'Queue depth',     value: fmtNum(uploads?.queue_depth) },
+                { label: 'Delayed',         value: fmtNum(uploads?.delayed_count) },
+                { label: 'Total retries',   value: fmtNum(uploads?.total_retries) },
+                { label: 'Avg speed',       value: uploads?.avg_speed_mbps != null ? `${uploads.avg_speed_mbps} Mb/s` : '—' },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex justify-between">
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', fontFamily: '"JetBrains Mono", monospace' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Storage Core — full-width with capacity gauge */}
+      <div className="mission-card p-5">
+        <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--chart-cyan)', marginBottom: 20 }}>
+          Storage Core
+        </h3>
+        <div className="grid gap-6" style={{ gridTemplateColumns: '200px 1fr' }}>
+          <div className="space-y-3">
+            {[
+              { label: 'Total processed', value: fmtBytes(storage?.total_bytes) },
+              { label: 'Average slide',   value: fmtBytes(storage?.avg_bytes) },
+              { label: 'Largest slide',   value: fmtBytes(storage?.max_bytes) },
+              { label: 'Uploaded today',  value: fmtBytes(storage?.uploaded_today_bytes) },
+            ].map(({ label, value }) => (
+              <div key={label}>
+                <div className="flex justify-between mb-1">
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: '"JetBrains Mono", monospace' }}>{value}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--text-faint)', marginBottom: 12 }}>
+              Storage by scanner
+            </div>
+            <div className="space-y-3">
+              {(storage?.by_scanner ?? []).slice(0, 6).map(s => {
+                const pct = storage?.total_bytes ? Math.min((s.total_bytes / storage.total_bytes) * 100, 100) : 0
+                return (
+                  <div key={s.scanner_id}>
+                    <div className="flex justify-between mb-1.5">
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.scanner_id}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: '"JetBrains Mono", monospace' }}>{fmtBytes(s.total_bytes)}</span>
+                    </div>
+                    <div style={{ height: 4, borderRadius: 2, overflow: 'hidden', background: 'var(--surface-1)' }}>
+                      <div style={{
+                        height: '100%', width: `${pct}%`,
+                        background: 'linear-gradient(90deg, var(--chart-cyan), var(--chart-teal))',
+                        transition: 'width 600ms ease',
+                        borderRadius: 2,
+                      }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export function ComputerCore() {
+  const { isLCARS } = useTheme()
   const navigate = useNavigate()
   const [activeSection, setActiveSection] = useState('status')
+
+  if (!isLCARS) return <ComputerCoreModern />
 
   const scrollTo = (id: string) => {
     setActiveSection(id)
@@ -758,64 +1190,88 @@ export function ComputerCore() {
   }
 
   return (
-    /*
-     * Normal document flow, escaped from Shell's p-7 via negative margins.
-     * height: calc(100vh - 48px) gives the LCARS console a fixed viewport
-     * footprint so content scrolls inside lc-content, not the page.
-     */
     <div
       className="lcars-core"
       style={{
-        margin: '-28px',
-        height: 'calc(100vh - 48px)',
+        margin: 0,
+        height: 'calc(100vh - 96px)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      {/* ── Header row ──────────────────────────────────────────── */}
-      <div style={{ display: 'flex', height: 56, flexShrink: 0 }}>
-        {/* Elbow piece */}
-        <div className="lc-elbow" style={{ width: 132, flexShrink: 0 }} />
-
-        {/* Header strip */}
-        <div className="lc-header-strip" style={{ flex: 1, gap: 16 }}>
-          <span className="lc-header-title">PALANTIR COMPUTER CORE</span>
-          <div
-            style={{
-              height: 18,
-              width: 2,
-              background: 'rgba(2,6,16,0.30)',
-              borderRadius: 1,
-              flexShrink: 0,
-            }}
-          />
-          <span className="lc-header-status">PATHOLOGY OPERATIONS CONSOLE</span>
-          <div style={{ flex: 1 }} />
-          <span className="lc-header-status lc-blink">● SYSTEMS ONLINE</span>
+      {/* ── Page title ribbon ───────────────────────────────────── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        height: 44,
+        flexShrink: 0,
+        background: 'rgba(0,3,14,0.95)',
+        borderBottom: '1px solid rgba(255,153,0,0.14)',
+      }}>
+        {/* Orange pill */}
+        <div style={{
+          display: 'flex', alignItems: 'center',
+          padding: '0 24px',
+          borderRadius: '0 22px 22px 0',
+          background: '#FF9900',
+          fontFamily: "'Antonio', 'Inter', sans-serif",
+          fontSize: 15, fontWeight: 600,
+          letterSpacing: '0.22em',
+          textTransform: 'uppercase',
+          color: 'rgba(0,5,20,0.90)',
+          flexShrink: 0,
+        }}>
+          COMPUTER CORE
+        </div>
+        {/* Sub-label */}
+        <div style={{
+          display: 'flex', alignItems: 'center',
+          padding: '0 16px', gap: 8,
+          fontFamily: "'Antonio', 'Inter', sans-serif",
+          fontSize: 9, letterSpacing: '0.24em',
+          textTransform: 'uppercase',
+          color: 'rgba(255,153,0,0.45)',
+        }}>
+          PIPELINE ANALYTICS &amp; OPERATIONS CONSOLE
+        </div>
+        {/* Right meta */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 16px', gap: 12 }}>
           <button
             type="button"
             onClick={() => navigate('/computer-core/fullscreen')}
             style={{
-              background: 'rgba(2,6,16,.18)',
-              border: '1.5px solid rgba(2,6,16,.28)',
-              borderRadius: 5,
-              padding: '4px 12px',
+              background: 'rgba(255,153,0,0.12)',
+              border: '1px solid rgba(255,153,0,0.28)',
+              borderRadius: 3,
+              padding: '4px 14px',
               fontSize: 10,
-              fontWeight: 700,
+              fontWeight: 600,
               letterSpacing: '.16em',
-              color: 'rgba(2,6,16,.70)',
+              color: 'rgba(255,153,0,0.80)',
               cursor: 'pointer',
               textTransform: 'uppercase',
               fontFamily: 'inherit',
               flexShrink: 0,
-              marginRight: 8,
               transition: 'background 120ms',
             }}
           >
             ⊞ FULLSCREEN
           </button>
-          <div style={{ width: 8 }} />
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            fontFamily: "'Antonio', 'Inter', sans-serif",
+            fontSize: 9, letterSpacing: '0.20em',
+            textTransform: 'uppercase',
+            color: 'rgba(0,221,136,0.75)',
+          }}>
+            <span style={{
+              width: 5, height: 5, borderRadius: '50%',
+              background: '#00DD88', flexShrink: 0,
+              animation: 'lcBlink 2.4s ease-in-out infinite',
+            }} aria-hidden />
+            ONLINE
+          </div>
         </div>
       </div>
 

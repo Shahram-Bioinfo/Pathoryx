@@ -69,6 +69,7 @@ from pathoryx_enterprise.monitoring.metrics import (
 )
 from pathoryx_enterprise.utils.datetime_utils import utc_now
 from pathoryx_enterprise.utils.fingerprint import deterministic_artifact_id
+from pathoryx_enterprise.utils.watch_folder_priority import build_resolver_from_config
 from sqlalchemy import select
 
 logger = structlog.get_logger(__name__)
@@ -91,6 +92,24 @@ _STAGE_ORDER: List[str] = [
 # =============================================================================
 # Atomic IO helpers (matching runner_daily_enterprise.py)
 # =============================================================================
+
+
+def _resolve_watch_folder_priority(config: Dict[str, Any], file_path: str) -> dict:
+    """Resolve watch folder priority for a detected file. Never raises."""
+    try:
+        wf_cfg = config.get("watch_folders") or []
+        fallback = str(config.get("watch_dir", ""))
+        resolver = build_resolver_from_config(wf_cfg, fallback_watch_dir=fallback or None)
+        result = resolver.resolve(file_path)
+        return {
+            "priority": result.priority,
+            "priority_source": result.priority_source,
+            "watch_folder_path": result.watch_folder_path,
+            "watch_folder_label": result.watch_folder_label,
+        }
+    except Exception:
+        return {"priority": 5, "priority_source": "default",
+                "watch_folder_path": None, "watch_folder_label": None}
 
 
 def _atomic_write_yaml(dst: Path, obj: Dict[str, Any]) -> None:
@@ -1801,6 +1820,140 @@ class BabelSharkStageRunner:
         self.log.error(f"[STAGE] {stage} FAILED: {error_msg}")
 
     # ------------------------------------------------------------------
+    # Phase 4.8B — Routing policy decision (dry-run, Stage 1)
+    # ------------------------------------------------------------------
+
+    def _run_routing_decision(
+        self,
+        file_record_id: int,
+        global_artifact_id: str,
+        slide_id: Optional[str],
+    ) -> None:
+        """
+        Evaluate the routing policy for a processed slide and persist the decision.
+
+        Stage 1 contract (dry_run=True):
+          - Computes and records the predicted destination.
+          - Does NOT change the actual upload destination.
+          - Never raises; any failure is logged and silently skipped.
+
+        Structured log format:
+          [ROUTING][DRY-RUN] slide=... scanner=... mode=... reason=... predicted=... actual_destination_unchanged=true
+        """
+        policies = self.config.get("routing_policies")
+        if not policies:
+            self.log.debug(
+                "[ROUTING] routing_policies not configured — skipping decision for "
+                f"file_record_id={file_record_id}"
+            )
+            return
+
+        try:
+            from pathoryx_enterprise.services.routing import RoutingPolicyEngine
+        except Exception as exc:
+            self.log.error(f"[ROUTING] Cannot import RoutingPolicyEngine: {exc}")
+            return
+
+        try:
+            engine = RoutingPolicyEngine(policies)
+        except Exception as exc:
+            self.log.error(
+                f"[ROUTING] Engine init failed: {exc} — "
+                "pipeline unaffected, routing decision skipped"
+            )
+            return
+
+        try:
+            from sqlalchemy import text as _sql_text
+            from pathoryx_enterprise.services.dashboard import routing_queries as rq
+
+            with get_session() as session:
+                # Resolve scanner_id from FileRecord
+                scanner_id: Optional[str] = None
+                try:
+                    _row = session.execute(
+                        _sql_text(
+                            "SELECT scanner_id FROM core.file_records WHERE internal_id = :id"
+                        ),
+                        {"id": file_record_id},
+                    ).fetchone()
+                    scanner_id = _row[0] if _row else None
+                except Exception as exc:
+                    self.log.debug(f"[ROUTING] Could not fetch scanner_id: {exc}")
+
+                # Resolve color_dot + confidence from color_marker_results
+                color_dot: Optional[str] = None
+                color_dot_confidence: Optional[float] = None
+                try:
+                    _cm = session.execute(
+                        _sql_text("""
+                            SELECT dominant_color, raw_payload
+                              FROM babelshark.color_marker_results
+                             WHERE file_record_internal_id = :id
+                             ORDER BY id DESC LIMIT 1
+                        """),
+                        {"id": file_record_id},
+                    ).fetchone()
+                    if _cm:
+                        raw_color = (_cm[0] or "").strip().lower()
+                        color_dot = raw_color if raw_color not in ("", "none") else None
+                        payload = _cm[1] or {}
+                        if isinstance(payload, dict):
+                            raw_conf = payload.get("Confidence")
+                            if raw_conf is not None:
+                                try:
+                                    color_dot_confidence = float(raw_conf)
+                                except (TypeError, ValueError):
+                                    pass
+                except Exception as exc:
+                    self.log.debug(f"[ROUTING] Could not fetch color_marker_results: {exc}")
+
+                # Load active overrides
+                try:
+                    overrides = rq.list_active_overrides(session)
+                except Exception:
+                    overrides = []
+
+                # Evaluate routing policy
+                result = engine.get_routing_decision(
+                    scanner_id=scanner_id,
+                    color_dot=color_dot,
+                    overrides=overrides,
+                    file_id=global_artifact_id,
+                )
+
+                # Persist the decision (audit trail only — never changes upload destination)
+                decision_id = rq.record_decision(
+                    session,
+                    slide_id=slide_id,
+                    scanner_id=result.scanner_id,
+                    mode=result.mode,
+                    profile=result.profile,
+                    color_dot=result.color_dot,
+                    color_dot_confidence=color_dot_confidence,
+                    destination=result.destination,
+                    routing_reason=result.routing_reason,
+                    override_id=result.override_id,
+                    dry_run=True,
+                )
+
+                self.log.info(
+                    f"[ROUTING][DRY-RUN] decision_id={decision_id} "
+                    f"slide={slide_id!r} scanner={result.scanner_id!r} "
+                    f"mode={result.mode!r} reason={result.routing_reason!r} "
+                    f"predicted_destination={result.destination!r} "
+                    f"color_dot={result.color_dot!r} "
+                    f"color_dot_confidence={color_dot_confidence!r} "
+                    f"actual_destination_unchanged=true"
+                )
+
+        except Exception as exc:
+            self.log.error(
+                f"[ROUTING] Decision recording failed: {exc} — "
+                "pipeline unaffected, slide continues normally"
+            )
+
+    # ------------------------------------------------------------------
     # Top-level enrichment orchestrator
     # ------------------------------------------------------------------
 
@@ -2034,10 +2187,11 @@ class BabelSharkStageRunner:
         # ---- Stage 8: Slide ID generation ----
         _routing_status = ""
         _routing_output_path = ""
+        _final_slide_id: Optional[str] = None
         if self._stage_enabled("slide_id_generation"):
             t0 = time.perf_counter()
             try:
-                _, _routing_status, _routing_output_path = self.run_slide_id_generation(
+                _final_slide_id, _routing_status, _routing_output_path = self.run_slide_id_generation(
                     slide_cfg,
                     file_record_id,
                     global_artifact_id,
@@ -2090,6 +2244,13 @@ class BabelSharkStageRunner:
                 f"[PIPELINE] Failed to merge slide outputs into daily dir: {exc}"
             )
 
+        # ---- Phase 4.8B: Routing decision (Stage 1 — dry-run, never changes destination) ----
+        self._run_routing_decision(
+            file_record_id=file_record_id,
+            global_artifact_id=global_artifact_id,
+            slide_id=_final_slide_id,
+        )
+
         # ---- Dispatch: QC trigger or babelshark_failed (deferred from intake) ----
         # Only dispatch QC when the file was successfully routed to final/.
         # Failed routes (failed/, failed_datamatrix/, unreadable/, etc.) must NOT
@@ -2127,6 +2288,10 @@ class BabelSharkStageRunner:
             else:
                 next_stage = os.environ.get("BABELSHARK_NEXT_STAGE", "qc")
                 next_service = os.environ.get("BABELSHARK_NEXT_SERVICE", "qc_service")
+                # Resolve watch folder priority from config
+                _wf_priority_info = _resolve_watch_folder_priority(
+                    self.config, str(staged_path)
+                )
                 try:
                     with get_session() as session:
                         BabelSharkDBWriter(session).mark_intake_complete(
@@ -2137,6 +2302,10 @@ class BabelSharkStageRunner:
                             correlation_id=self.correlation_id,
                             runner_id=self.runner_id,
                             host_id=self.host_id,
+                            priority=_wf_priority_info["priority"],
+                            priority_source=_wf_priority_info["priority_source"],
+                            watch_folder_path=_wf_priority_info.get("watch_folder_path"),
+                            watch_folder_label=_wf_priority_info.get("watch_folder_label"),
                         )
                     self.log.info(
                         f"[PIPELINE] QC trigger dispatched: next_stage={next_stage!r}"

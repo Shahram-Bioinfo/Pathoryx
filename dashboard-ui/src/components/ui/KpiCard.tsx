@@ -22,6 +22,26 @@ const ACCENT_VAR: Record<NonNullable<Props['accent']>, string> = {
   emerald: 'var(--chart-emerald)',
 }
 
+// Resolved hex/rgba for dot glow (CSS vars can't be used in box-shadow easily)
+const ACCENT_DOT_COLOR: Record<NonNullable<Props['accent']>, string> = {
+  cyan:    '#00AADD',
+  teal:    '#00CCAA',
+  amber:   '#FFAA00',
+  rose:    '#FF6666',
+  violet:  '#CC88FF',
+  emerald: '#00DD88',
+}
+
+// Blink speed — faster = more urgent
+const ACCENT_BLINK_SPEED: Record<NonNullable<Props['accent']>, string> = {
+  cyan:    '2.4s',
+  teal:    '2.0s',
+  amber:   '1.2s',
+  rose:    '0.7s',
+  violet:  '2.8s',
+  emerald: '2.2s',
+}
+
 // Icon classes use both light and dark text-color variants
 const ICON_CLASS: Record<NonNullable<Props['accent']>, string> = {
   cyan:    'text-sky-600 dark:text-cyan-400',
@@ -34,6 +54,8 @@ const ICON_CLASS: Record<NonNullable<Props['accent']>, string> = {
 
 export function KpiCard({ label, value, icon: Icon, accent = 'cyan', subtext, trend, loading }: Props) {
   const accentColor = ACCENT_VAR[accent]
+  const dotColor    = ACCENT_DOT_COLOR[accent]
+  const blinkSpeed  = ACCENT_BLINK_SPEED[accent]
   const isFlashing  = useFlashOnChange(loading ? '—' : String(value))
 
   return (
@@ -52,7 +74,22 @@ export function KpiCard({ label, value, icon: Icon, accent = 'cyan', subtext, tr
 
       <div className="p-5">
         <div className="flex items-start justify-between mb-4">
-          <p className="section-label mb-0 leading-none">{label}</p>
+          <div className="flex items-center gap-1.5">
+            {/* Status indicator dot — visible only in LCARS mode via .lc-kpi-dot CSS */}
+            <span
+              className="lc-kpi-dot"
+              aria-hidden
+              style={{
+                width: 5, height: 5,
+                borderRadius: '50%',
+                flexShrink: 0,
+                background: dotColor,
+                boxShadow: `0 0 5px ${dotColor}`,
+                animation: `lcBlink ${blinkSpeed} ease-in-out infinite`,
+              }}
+            />
+            <p className="section-label mb-0 leading-none">{label}</p>
+          </div>
           <Icon
             className={clsx('h-3.5 w-3.5 opacity-50', ICON_CLASS[accent])}
             aria-hidden
@@ -63,7 +100,7 @@ export function KpiCard({ label, value, icon: Icon, accent = 'cyan', subtext, tr
           <div className="ops-skeleton h-8 w-28 rounded" />
         ) : (
           <p
-            className="text-[28px] font-semibold leading-none tracking-tight tabular"
+            className="lc-kpi-value text-[28px] font-semibold leading-none tracking-tight tabular"
             style={{
               fontFamily: '"JetBrains Mono", monospace',
               color: 'var(--text-primary)',

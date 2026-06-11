@@ -12,11 +12,9 @@ Dead-letter recovery:
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import and_, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from pathoryx_enterprise.db.models.core import ServiceTrigger
 from pathoryx_enterprise.db.repositories.base import BaseRepository
@@ -31,6 +29,7 @@ class TriggerRepository(BaseRepository):
         *,
         runner_id: str = "",
         host_id: str = "",
+        priority_aware: bool = False,
     ) -> Optional[ServiceTrigger]:
         """
         Atomically claim the next pending trigger for target_service.
@@ -39,10 +38,14 @@ class TriggerRepository(BaseRepository):
           - FOR UPDATE: locks the row so no other worker can claim it simultaneously.
           - SKIP LOCKED: workers skip rows already locked by another, preventing wait storms.
 
+        When priority_aware=True (used by upload_service), ordering is:
+          priority ASC → triggered_at ASC → internal_id ASC
+        Otherwise FIFO: triggered_at ASC only.
+
         Returns None if no pending triggers exist.
         The caller must commit after processing to release the lock.
         """
-        stmt = (
+        base = (
             select(ServiceTrigger)
             .where(
                 and_(
@@ -50,10 +53,19 @@ class TriggerRepository(BaseRepository):
                     ServiceTrigger.trigger_status == "pending",
                 )
             )
-            .order_by(ServiceTrigger.triggered_at.asc())
             .limit(1)
             .with_for_update(skip_locked=True)
         )
+
+        if priority_aware:
+            stmt = base.order_by(
+                ServiceTrigger.priority.asc(),
+                ServiceTrigger.triggered_at.asc(),
+                ServiceTrigger.internal_id.asc(),
+            )
+        else:
+            stmt = base.order_by(ServiceTrigger.triggered_at.asc())
+
         trigger = self._session.execute(stmt).scalar_one_or_none()
 
         if trigger is None:
@@ -83,6 +95,7 @@ class TriggerRepository(BaseRepository):
         otel_trace_id: Optional[str] = None,
         payload_json: Optional[dict] = None,
         max_retries: int = 3,
+        priority: int = 5,
     ) -> ServiceTrigger:
         """
         Create a new trigger using INSERT … ON CONFLICT DO NOTHING.
@@ -92,7 +105,6 @@ class TriggerRepository(BaseRepository):
         """
         now = utc_now()
 
-        # Try plain insert; if the unique constraint fires, fetch the existing row
         existing = self._session.execute(
             select(ServiceTrigger).where(
                 and_(
@@ -122,6 +134,7 @@ class TriggerRepository(BaseRepository):
             correlation_id=correlation_id,
             otel_trace_id=otel_trace_id,
             triggered_at=now,
+            priority=priority,
         )
         self._session.add(trigger)
         self._session.flush()
@@ -139,6 +152,7 @@ class TriggerRepository(BaseRepository):
         runner_id: Optional[str] = None,
         payload: Optional[dict] = None,
         max_retries: int = 3,
+        priority: int = 5,
     ) -> tuple[ServiceTrigger, bool]:
         """Enqueue a trigger; returns (trigger, created). Idempotent."""
         now = utc_now()
@@ -169,10 +183,16 @@ class TriggerRepository(BaseRepository):
             max_retries=max_retries,
             correlation_id=correlation_id,
             triggered_at=now,
+            priority=priority,
         )
         self._session.add(trigger)
         self._session.flush()
         return trigger, True
+
+    def update_priority(self, trigger: ServiceTrigger, priority: int) -> None:
+        """Update the priority of a pending trigger in-place."""
+        trigger.priority = priority
+        self._session.flush()
 
     def mark_completed(self, trigger: ServiceTrigger) -> None:
         trigger.trigger_status = "completed"
@@ -181,7 +201,7 @@ class TriggerRepository(BaseRepository):
 
     def mark_failed(self, trigger: ServiceTrigger, error_message: str) -> None:
         trigger.trigger_status = "failed"
-        trigger.error_message = error_message[:2000]  # cap length
+        trigger.error_message = error_message[:2000]
         trigger.finished_at = utc_now()
         trigger.retry_count = (trigger.retry_count or 0) + 1
         self._session.flush()

@@ -470,7 +470,7 @@ def run(settings: QCSettings) -> None:
                 repo = TriggerRepository(session)
 
                 for _ in range(settings.max_workers):
-                    trigger = repo.dequeue_next(target_service=SERVICE_NAME)
+                    trigger = repo.dequeue_next(target_service=SERVICE_NAME, priority_aware=True)
                     if trigger is None:
                         break
 

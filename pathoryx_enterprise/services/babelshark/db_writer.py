@@ -140,6 +140,10 @@ class BabelSharkDBWriter:
         host_id: str | None = None,
         service_version: str | None = None,
         metadata_payload: dict | None = None,
+        priority: int = 5,
+        priority_source: str = "default",
+        watch_folder_path: str | None = None,
+        watch_folder_label: str | None = None,
     ) -> ServiceTrigger:
         """
         Transition FileRecord to the appropriate post-intake status and dispatch
@@ -170,6 +174,15 @@ class BabelSharkDBWriter:
                 source_service=SERVICE_NAME,
             )
 
+        # Build payload — include priority info so downstream services can propagate it
+        payload = _build_trigger_payload(record, global_artifact_id)
+        payload["priority"] = priority
+        payload["priority_source"] = priority_source
+        if watch_folder_path:
+            payload["watch_folder_path"] = watch_folder_path
+        if watch_folder_label:
+            payload["watch_folder_label"] = watch_folder_label
+
         # Dispatch to next stage — always include a rich payload so downstream
         # services (QC, DICOM) can resolve the file without extra DB lookups.
         trigger, created = self._trigger_repo.enqueue(
@@ -180,7 +193,8 @@ class BabelSharkDBWriter:
             global_artifact_id=global_artifact_id,
             correlation_id=correlation_id,
             runner_id=runner_id,
-            payload=_build_trigger_payload(record, global_artifact_id),
+            payload=payload,
+            priority=priority,
         )
 
         # Immutable event

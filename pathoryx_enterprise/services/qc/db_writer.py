@@ -354,6 +354,8 @@ class QCDBWriter:
                     runner_id=runner_id,
                 )
             else:
+                # Propagate priority fields from incoming trigger payload
+                _priority = int(_payload.get("priority", 5))
                 downstream_payload = {
                     "source_path": _source_path,
                     "scanner_id": _scanner_id,
@@ -363,6 +365,10 @@ class QCDBWriter:
                     "correlation_id": correlation_id,
                     "qc_context": _qc_context,
                     "source_service": SERVICE_NAME,
+                    "priority": _priority,
+                    "priority_source": _payload.get("priority_source", "default"),
+                    "watch_folder_path": _payload.get("watch_folder_path"),
+                    "watch_folder_label": _payload.get("watch_folder_label"),
                 }
                 self._trigger_repo.enqueue(
                     source_service=SERVICE_NAME,
@@ -373,6 +379,7 @@ class QCDBWriter:
                     correlation_id=correlation_id,
                     runner_id=runner_id,
                     payload=downstream_payload,
+                    priority=_priority,
                 )
 
         # ── 10. Immutable event ────────────────────────────────────────────

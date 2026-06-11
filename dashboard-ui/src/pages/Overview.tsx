@@ -35,7 +35,7 @@ export function Overview() {
       {isError && (
         <div className="mb-6">
           <ErrorBanner
-            message="Cannot reach API backend. Is Palantir dashboard backend running on port 8090?"
+            message="Cannot reach API backend. Is DPARS dashboard backend running on port 8090?"
             onRetry={refetch}
           />
         </div>

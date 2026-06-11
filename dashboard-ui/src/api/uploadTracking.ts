@@ -4,6 +4,7 @@ import type {
   UploadIngestRequest,
   UploadIngestResponse,
   UploadMetrics,
+  UploadPrioritySummary,
   UploadPriorityRequest,
   UploadQueueItem,
   UploadQueueResponse,
@@ -16,21 +17,29 @@ export interface UploadQueueParams {
   search?: string
   from_date?: string
   to_date?: string
+  priority_filter?: number
   page?: number
   page_size?: number
 }
 
 export const fetchUploadQueue = (params: UploadQueueParams = {}): Promise<UploadQueueResponse> =>
   apiFetch<UploadQueueResponse>('/uploads/queue', {
-    ...(params.status        ? { status:        params.status }        : {}),
-    ...(params.scanner_id    ? { scanner_id:    params.scanner_id }    : {}),
-    ...(params.uploader_host ? { uploader_host: params.uploader_host } : {}),
-    ...(params.search        ? { search:        params.search }        : {}),
-    ...(params.from_date     ? { from_date:     params.from_date }     : {}),
-    ...(params.to_date       ? { to_date:       params.to_date }       : {}),
+    ...(params.status           ? { status:          params.status }           : {}),
+    ...(params.scanner_id       ? { scanner_id:      params.scanner_id }       : {}),
+    ...(params.uploader_host    ? { uploader_host:   params.uploader_host }    : {}),
+    ...(params.search           ? { search:          params.search }           : {}),
+    ...(params.from_date        ? { from_date:       params.from_date }        : {}),
+    ...(params.to_date          ? { to_date:         params.to_date }          : {}),
+    ...(params.priority_filter != null ? { priority_filter: params.priority_filter } : {}),
     page:      params.page      ?? 1,
     page_size: params.page_size ?? 50,
   })
+
+export const fetchUploadPriorities = (): Promise<UploadPrioritySummary> =>
+  apiFetch<UploadPrioritySummary>('/uploads/priorities')
+
+export const fetchNextUploads = (limit = 10): Promise<UploadQueueItem[]> =>
+  apiFetch<UploadQueueItem[]>('/uploads/next', { limit })
 
 export const fetchUploadMetrics = (): Promise<UploadMetrics> =>
   apiFetch<UploadMetrics>('/uploads/metrics')

@@ -74,8 +74,8 @@ function useClock() {
 // ── Priority helpers ─────────────────────────────────────────────────────────
 
 const PRIO_NEXT   = 0
+const PRIO_HIGH   = 1
 const PRIO_NORMAL = 5
-const PRIO_LOW    = 9
 const TERMINAL_STATUSES = new Set(['uploaded', 'failed'])
 
 function prioBadge(item: UploadQueueItem): { label: string; cls: string } {
@@ -85,7 +85,7 @@ function prioBadge(item: UploadQueueItem): { label: string; cls: string } {
   if (item.is_delayed || item.upload_status === 'delayed')
                                           return { label: 'DELAYED',   cls: 'fs-badge-delayed' }
   if (item.priority === PRIO_NEXT)        return { label: 'NEXT',      cls: 'fs-badge-next'    }
-  if (item.priority >= PRIO_LOW)          return { label: 'LOW',       cls: 'fs-badge-low'     }
+  if (item.priority === PRIO_HIGH)        return { label: 'HIGH',      cls: 'fs-badge-next'    }
   return { label: 'QUEUED', cls: 'fs-badge-normal' }
 }
 
@@ -193,6 +193,64 @@ function FsEmpty({ label }: { label: string }) {
   return (
     <div style={{ padding: '8px 0', fontSize: 9, letterSpacing: '.16em', color: 'var(--fs-text-faint)' }}>
       {label}
+    </div>
+  )
+}
+
+// ── Header analytics strip ───────────────────────────────────────────────────
+
+function FsHeaderStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
+      <span style={{ fontSize: 20, fontWeight: 400, letterSpacing: '.04em', color, lineHeight: 1 }}>{value}</span>
+      <span style={{ fontSize: 7, letterSpacing: '.18em', color: 'rgba(1,11,30,0.50)', textTransform: 'uppercase' }}>{label}</span>
+    </div>
+  )
+}
+
+function FsHeaderAnalytics() {
+  const { data } = useCoreOverview()
+
+  const total    = data?.total_slides       ?? 0
+  const active   = data?.active_uploads     ?? 0
+  const queued   = data?.queued_uploads      ?? 0
+  const uploaded = data?.uploaded_today     ?? 0
+  const failed   = data?.failed_slides       ?? 0
+  const delayed  = data?.delayed_uploads     ?? 0
+
+  return (
+    <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 20, overflow: 'hidden', paddingRight: 8 }}>
+      {/* Quick stats */}
+      <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexShrink: 0 }}>
+        <FsHeaderStat label="TOTAL"  value={fmtNum(total)}    color="var(--fs-orange)"   />
+        <div style={{ width: 1, height: 28, background: 'rgba(1,11,30,0.15)' }} />
+        <FsHeaderStat label="TODAY"  value={fmtNum(uploaded)} color="rgba(1,11,30,0.65)" />
+        <FsHeaderStat label="ACTIVE" value={fmtNum(active)}   color={active > 0 ? 'rgba(1,50,30,0.85)' : 'rgba(1,11,30,0.40)'} />
+        <FsHeaderStat label="QUEUED" value={fmtNum(queued)}   color="rgba(1,11,30,0.62)" />
+        {failed > 0 && (
+          <FsHeaderStat label="FAILED"  value={String(failed)}  color="rgba(100,0,0,0.88)" />
+        )}
+        {delayed > 0 && (
+          <FsHeaderStat label="DELAYED" value={String(delayed)} color="rgba(80,50,0,0.88)" />
+        )}
+      </div>
+
+      {/* Pipeline distribution bar */}
+      <div style={{ flex: 1, minWidth: 60, maxWidth: 220, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', height: 7, borderRadius: 4, overflow: 'hidden', background: 'rgba(1,11,30,0.15)' }}>
+          <div style={{ flex: queued,   background: 'rgba(60,80,180,0.55)', transition: 'flex 600ms ease', minWidth: queued > 0 ? 3 : 0 }} />
+          <div style={{ flex: active,   background: 'rgba(20,120,80,0.70)', transition: 'flex 600ms ease', minWidth: active > 0 ? 3 : 0 }} />
+          <div style={{ flex: uploaded, background: 'rgba(1,11,30,0.30)',   transition: 'flex 600ms ease', minWidth: uploaded > 0 ? 3 : 0 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <span style={{ fontSize: 7, letterSpacing: '.10em', color: 'rgba(1,11,30,0.48)' }}>● QUEUED</span>
+          <span style={{ fontSize: 7, letterSpacing: '.10em', color: 'rgba(1,11,30,0.48)' }}>● ACTIVE</span>
+          <span style={{ fontSize: 7, letterSpacing: '.10em', color: 'rgba(1,11,30,0.48)' }}>● DONE</span>
+        </div>
+      </div>
+
+      {/* System status */}
+      <span className="fs-header-badge fs-blink" style={{ flexShrink: 0 }}>● SYSTEMS ONLINE</span>
     </div>
   )
 }
@@ -379,8 +437,8 @@ function UploadQueueSection() {
     retry: 1,
   })
   const pm = useMutation({
-    mutationFn: ({ id, priority }: { id: number; priority: number }) =>
-      patchUploadPriority(id, { priority }),
+    mutationFn: ({ id, mode }: { id: number; mode: 'upload_next' | 'normal' }) =>
+      patchUploadPriority(id, { mode }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['uploads', 'queue'] }),
   })
 
@@ -427,7 +485,7 @@ function UploadQueueSection() {
                   background:
                     isUploading              ? 'var(--fs-teal)' :
                     item.priority === PRIO_NEXT ? 'var(--fs-orange)' :
-                    item.priority >= PRIO_LOW   ? 'var(--fs-text-faint)' :
+                    item.priority === PRIO_HIGH ? 'var(--fs-orange)' :
                     'var(--fs-lt-blue)',
                 }} />
 
@@ -460,7 +518,7 @@ function UploadQueueSection() {
                         {!isUploading && item.priority !== PRIO_NEXT && (
                           <button
                             className="fs-btn fs-btn-orange"
-                            onClick={() => pm.mutate({ id: item.id, priority: PRIO_NEXT })}
+                            onClick={() => pm.mutate({ id: item.id, mode: 'upload_next' })}
                             title="Mark as Upload Next"
                           >
                             NEXT
@@ -469,7 +527,7 @@ function UploadQueueSection() {
                         {!isUploading && item.priority !== PRIO_NORMAL && (
                           <button
                             className="fs-btn fs-btn-blue"
-                            onClick={() => pm.mutate({ id: item.id, priority: PRIO_NORMAL })}
+                            onClick={() => pm.mutate({ id: item.id, mode: 'normal' })}
                             title="Reset to Normal Priority"
                           >
                             RESET
@@ -896,15 +954,17 @@ export function ComputerCoreFullscreen() {
 
       {/* Header */}
       <div className="fs-header-row">
-        <div className="fs-elbow">
-          <span className="fs-elbow-brand">PALANTIR</span>
+        <div className="fs-elbow" style={{ flexDirection: 'column', gap: 3, paddingBottom: 8 }}>
+          <img
+            src="/dpars-logo.png"
+            alt="DPARS"
+            onError={(e) => { e.currentTarget.style.display = 'none' }}
+            style={{ height: 30, width: 'auto', objectFit: 'contain', maxWidth: 140 }}
+          />
+          <span className="fs-elbow-brand">DPARS</span>
         </div>
         <div className="fs-header-strip">
-          <span className="fs-header-title">COMPUTER CORE</span>
-          <div className="fs-header-sep" />
-          <span className="fs-header-sub">PATHOLOGY OPERATIONS CONSOLE</span>
-          <div className="fs-header-spacer" />
-          <span className="fs-header-badge fs-blink">● SYSTEMS ONLINE</span>
+          <FsHeaderAnalytics />
           <div className="fs-header-sep" />
           <button className="fs-exit-btn" type="button" onClick={() => navigate('/computer-core')}>
             ← EXIT

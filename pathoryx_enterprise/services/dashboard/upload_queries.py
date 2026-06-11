@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from .scanner_fleet import ScannerFleet
 
+from pathoryx_enterprise.db.models.core import ServiceTrigger
 from pathoryx_enterprise.db.models.upload_tracking import EstimatedUploadQueue
 
 # Statuses that represent "terminal" — no longer expected to upload
@@ -26,6 +27,9 @@ _ACTIVE_STATUSES = frozenset({"uploading"})
 
 # Statuses that represent pending work (for queued metric)
 _PENDING_STATUSES = frozenset({"queued", "estimating"})
+
+# Internal numeric priority values: 0=UPLOAD_NEXT, 1=HIGH, 5=NORMAL
+VALID_PRIORITIES = frozenset({0, 1, 5})
 
 
 def _now() -> datetime:
@@ -54,6 +58,7 @@ def list_upload_queue(
     search: Optional[str] = None,
     from_date: Optional[datetime] = None,
     to_date: Optional[datetime] = None,
+    priority_filter: Optional[int] = None,
     page: int = 1,
     page_size: int = 50,
 ) -> tuple[int, list[dict]]:
@@ -91,6 +96,8 @@ def list_upload_queue(
         q = q.where(EstimatedUploadQueue.queued_at >= from_date)
     if to_date:
         q = q.where(EstimatedUploadQueue.queued_at <= to_date)
+    if priority_filter is not None:
+        q = q.where(EstimatedUploadQueue.priority == priority_filter)
 
     total: int = session.execute(
         select(func.count()).select_from(q.subquery())
@@ -161,6 +168,27 @@ def get_upload_metrics(session: Session) -> dict:
     }
 
 
+def get_next_uploads_preview(session: Session, limit: int = 10) -> list[dict]:
+    """
+    Return the next N items that will be dequeued for upload, ordered by
+    priority ASC → queued_at ASC (same ordering as the uploader's dequeue).
+
+    Only returns non-terminal, non-active rows (status in queued/estimating/delayed).
+    Used by the dashboard "Next Uploads" panel.
+    """
+    now = _now()
+    rows = session.execute(
+        select(EstimatedUploadQueue)
+        .where(EstimatedUploadQueue.upload_status.notin_(_TERMINAL_STATUSES | _ACTIVE_STATUSES))
+        .order_by(
+            EstimatedUploadQueue.priority.asc(),
+            EstimatedUploadQueue.queued_at.asc(),
+        )
+        .limit(limit)
+    ).scalars().all()
+    return [_row_to_dict(r, now) for r in rows]
+
+
 def get_upload_record(session: Session, record_id: int) -> Optional[dict]:
     row = session.execute(
         select(EstimatedUploadQueue).where(EstimatedUploadQueue.id == record_id)
@@ -192,6 +220,69 @@ def list_upload_hosts(session: Session) -> list[str]:
     return list(rows)
 
 
+def get_priority_summary(session: Session) -> dict:
+    """
+    Return priority distribution counts and per-source counts for non-terminal records.
+
+    Used by GET /dashboard/api/uploads/priorities.
+    """
+    rows = session.execute(
+        select(
+            EstimatedUploadQueue.priority,
+            EstimatedUploadQueue.priority_source,
+            EstimatedUploadQueue.upload_status,
+            EstimatedUploadQueue.watch_folder_path,
+            EstimatedUploadQueue.watch_folder_label,
+        )
+    ).all()
+
+    by_priority: dict[int, int] = {}
+    by_source: dict[str, int] = {}
+    watch_folder_counts: dict[str, dict] = {}
+
+    for row in rows:
+        if row.upload_status in _TERMINAL_STATUSES:
+            continue
+        p = row.priority
+        src = row.priority_source or "default"
+        by_priority[p] = by_priority.get(p, 0) + 1
+        by_source[src] = by_source.get(src, 0) + 1
+
+        if row.watch_folder_path:
+            key = row.watch_folder_path
+            if key not in watch_folder_counts:
+                watch_folder_counts[key] = {
+                    "watch_folder_path": key,
+                    "watch_folder_label": row.watch_folder_label or key,
+                    "priority": p,
+                    "queued_count": 0,
+                }
+            watch_folder_counts[key]["queued_count"] += 1
+
+    # Only HIGH watch folders are operationally relevant in the simplified model
+    high_watch_folders = [
+        v for v in watch_folder_counts.values() if v["priority"] == 1
+    ]
+
+    return {
+        "by_priority": {
+            "upload_next": by_priority.get(0, 0),
+            "high":        by_priority.get(1, 0),
+            "normal":      by_priority.get(5, 0),
+        },
+        "by_source": {
+            "manual":       by_source.get("manual", 0),
+            "watch_folder": by_source.get("watch_folder", 0),
+            "upload_next":  by_source.get("upload_next", 0),
+            "default":      by_source.get("default", 0),
+        },
+        "watch_folders": sorted(
+            high_watch_folders,
+            key=lambda x: x["watch_folder_label"],
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Write queries
 # ---------------------------------------------------------------------------
@@ -212,23 +303,30 @@ def upsert_upload_records(session: Session, records: list[dict]) -> tuple[int, i
 
     for rec in records:
         rec.setdefault("last_updated_at", now)
+        ins = pg_insert(EstimatedUploadQueue)
         stmt = (
-            pg_insert(EstimatedUploadQueue)
+            ins
             .values(**rec)
             .on_conflict_do_update(
                 constraint="uq_euq_filename_queued_at",
                 set_={
-                    "upload_status":       pg_insert(EstimatedUploadQueue).excluded.upload_status,
-                    "estimated_upload_at": pg_insert(EstimatedUploadQueue).excluded.estimated_upload_at,
-                    "upload_started_at":   pg_insert(EstimatedUploadQueue).excluded.upload_started_at,
-                    "upload_completed_at": pg_insert(EstimatedUploadQueue).excluded.upload_completed_at,
-                    "upload_speed_mbps":   pg_insert(EstimatedUploadQueue).excluded.upload_speed_mbps,
-                    "retry_count":         pg_insert(EstimatedUploadQueue).excluded.retry_count,
-                    "failure_reason":      pg_insert(EstimatedUploadQueue).excluded.failure_reason,
-                    "last_updated_at":     pg_insert(EstimatedUploadQueue).excluded.last_updated_at,
+                    "upload_status":       ins.excluded.upload_status,
+                    "estimated_upload_at": ins.excluded.estimated_upload_at,
+                    "upload_started_at":   ins.excluded.upload_started_at,
+                    "upload_completed_at": ins.excluded.upload_completed_at,
+                    "upload_speed_mbps":   ins.excluded.upload_speed_mbps,
+                    "retry_count":         ins.excluded.retry_count,
+                    "failure_reason":      ins.excluded.failure_reason,
+                    "last_updated_at":     ins.excluded.last_updated_at,
+                    # Priority: only update if incoming value is more urgent (lower)
+                    # and priority_source is not 'file' (operator set wins)
+                    "priority":            func.least(
+                        EstimatedUploadQueue.priority,
+                        ins.excluded.priority,
+                    ),
                 },
                 where=(
-                    pg_insert(EstimatedUploadQueue).excluded.last_updated_at
+                    ins.excluded.last_updated_at
                     > EstimatedUploadQueue.last_updated_at
                 ),
             )
@@ -270,15 +368,60 @@ def update_upload_record(session: Session, record_id: int, updates: dict) -> Opt
     return get_upload_record(session, record_id)
 
 
-def update_upload_priority(session: Session, record_id: int, priority: int) -> Optional[dict]:
-    """
-    Update the priority of a queued upload record.
+_VALID_MODES = frozenset({"upload_next", "high", "normal", "clear_upload_next"})
 
-    Raises ValueError for terminal statuses (uploaded/failed) — priority
-    changes are meaningless once a record is done.
-    Advances last_updated_at so the SSE upload_queue_updated event fires.
-    Returns None if record does not exist.
+
+def _resolve_mode(mode: str, row: "EstimatedUploadQueue") -> tuple[int, str, Optional[str]]:
     """
+    Map a mode string to (priority, priority_source, priority_reason).
+
+    clear_upload_next restores to HIGH if the row had watch_folder origin or
+    was manually HIGH before the upload_next flag was set; otherwise NORMAL.
+    """
+    if mode == "upload_next":
+        was_high = row.priority == 1
+        return 0, "upload_next", ("was_high" if was_high else None)
+    if mode == "high":
+        return 1, "manual", None
+    if mode == "normal":
+        return 5, "default", None
+    if mode == "clear_upload_next":
+        if row.watch_folder_path:
+            return 1, "watch_folder", None
+        if row.priority_reason == "was_high":
+            return 1, "manual", None
+        return 5, "default", None
+    raise ValueError(f"Invalid mode '{mode}'. Allowed: {sorted(_VALID_MODES)}")
+
+
+def update_upload_priority_mode(
+    session: Session,
+    record_id: int,
+    mode: str,
+    *,
+    updated_by: str = "operator",
+) -> Optional[dict]:
+    """
+    Update the priority of a queued upload record using an operator-friendly mode string.
+
+    Modes:
+      upload_next       — priority 0; stores "was_high" reason if currently HIGH so
+                          clear_upload_next can restore correctly
+      high              — priority 1, source "manual"
+      normal            — priority 5, source "default"
+      clear_upload_next — restore to HIGH (watch_folder or manual) or NORMAL based on history
+
+    Rules:
+      - Terminal statuses (uploaded/failed) cannot be re-prioritized
+      - Syncs priority to matching pending upload ServiceTrigger for immediate dequeue effect
+      - Advances last_updated_at so SSE fires
+
+    Returns None if record does not exist.
+    Raises ValueError for invalid mode or terminal status.
+    """
+    if mode not in _VALID_MODES:
+        raise ValueError(f"Invalid mode '{mode}'. Allowed: {sorted(_VALID_MODES)}")
+
     row = session.execute(
         select(EstimatedUploadQueue).where(EstimatedUploadQueue.id == record_id)
     ).scalar_one_or_none()
@@ -286,12 +429,90 @@ def update_upload_priority(session: Session, record_id: int, priority: int) -> O
         return None
     if row.upload_status in _TERMINAL_STATUSES:
         raise ValueError(f"Cannot change priority of record with status '{row.upload_status}'")
+
+    priority, source, reason = _resolve_mode(mode, row)
+    now = _now()
+
     session.execute(
         update(EstimatedUploadQueue)
         .where(EstimatedUploadQueue.id == record_id)
-        .values(priority=priority, last_updated_at=_now())
+        .values(
+            priority=priority,
+            priority_source=source,
+            priority_reason=reason,
+            priority_updated_at=now,
+            priority_updated_by=updated_by,
+            last_updated_at=now,
+        )
     )
     session.flush()
+
+    # Sync priority to the matching pending upload ServiceTrigger so dequeue ordering
+    # is respected immediately without waiting for a re-enqueue cycle.
+    if row.file_record_internal_id is not None:
+        pending_trigger = session.execute(
+            select(ServiceTrigger).where(
+                ServiceTrigger.file_record_internal_id == row.file_record_internal_id,
+                ServiceTrigger.target_service == "upload_service",
+                ServiceTrigger.trigger_status == "pending",
+            )
+        ).scalar_one_or_none()
+        if pending_trigger is not None:
+            pending_trigger.priority = priority
+            session.flush()
+
+    return get_upload_record(session, record_id)
+
+
+def update_upload_priority(
+    session: Session,
+    record_id: int,
+    priority: int,
+    *,
+    reason: Optional[str] = None,
+    updated_by: str = "operator",
+) -> Optional[dict]:
+    """Internal helper — prefer update_upload_priority_mode for new callers."""
+    if priority not in VALID_PRIORITIES:
+        raise ValueError(
+            f"Invalid priority {priority}. Allowed values: {sorted(VALID_PRIORITIES)}"
+        )
+
+    row = session.execute(
+        select(EstimatedUploadQueue).where(EstimatedUploadQueue.id == record_id)
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    if row.upload_status in _TERMINAL_STATUSES:
+        raise ValueError(f"Cannot change priority of record with status '{row.upload_status}'")
+
+    now = _now()
+    session.execute(
+        update(EstimatedUploadQueue)
+        .where(EstimatedUploadQueue.id == record_id)
+        .values(
+            priority=priority,
+            priority_source="manual",
+            priority_reason=reason,
+            priority_updated_at=now,
+            priority_updated_by=updated_by,
+            last_updated_at=now,
+        )
+    )
+    session.flush()
+
+    if row.file_record_internal_id is not None:
+        pending_trigger = session.execute(
+            select(ServiceTrigger).where(
+                ServiceTrigger.file_record_internal_id == row.file_record_internal_id,
+                ServiceTrigger.target_service == "upload_service",
+                ServiceTrigger.trigger_status == "pending",
+            )
+        ).scalar_one_or_none()
+        if pending_trigger is not None:
+            pending_trigger.priority = priority
+            session.flush()
+
     return get_upload_record(session, record_id)
 
 
@@ -321,23 +542,30 @@ def query_upload_max_updated(session: Session) -> Optional[datetime]:
 
 def _row_to_dict(row: EstimatedUploadQueue, now: datetime) -> dict:
     return {
-        "id":                  row.id,
-        "slide_id":            row.slide_id,
-        "filename":            row.filename,
-        "scanner_id":          row.scanner_id,
-        "uploader_host":       row.uploader_host,
-        "queued_at":           row.queued_at,
-        "estimated_upload_at": row.estimated_upload_at,
-        "upload_started_at":   row.upload_started_at,
-        "upload_completed_at": row.upload_completed_at,
-        "upload_status":       row.upload_status,
-        "retry_count":         row.retry_count,
-        "file_size_bytes":     row.file_size_bytes,
-        "priority":            row.priority,
-        "upload_speed_mbps":   row.upload_speed_mbps,
-        "failure_reason":      row.failure_reason,
-        "last_updated_at":     row.last_updated_at,
-        "is_delayed":          _is_delayed(row, now),
+        "id":                       row.id,
+        "file_record_internal_id":  row.file_record_internal_id,
+        "slide_id":                 row.slide_id,
+        "filename":                 row.filename,
+        "scanner_id":               row.scanner_id,
+        "uploader_host":            row.uploader_host,
+        "queued_at":                row.queued_at,
+        "estimated_upload_at":      row.estimated_upload_at,
+        "upload_started_at":        row.upload_started_at,
+        "upload_completed_at":      row.upload_completed_at,
+        "upload_status":            row.upload_status,
+        "retry_count":              row.retry_count,
+        "file_size_bytes":          row.file_size_bytes,
+        "priority":                 row.priority,
+        "priority_source":          row.priority_source,
+        "priority_reason":          row.priority_reason,
+        "priority_updated_at":      row.priority_updated_at,
+        "priority_updated_by":      row.priority_updated_by,
+        "watch_folder_path":        row.watch_folder_path,
+        "watch_folder_label":       row.watch_folder_label,
+        "upload_speed_mbps":        row.upload_speed_mbps,
+        "failure_reason":           row.failure_reason,
+        "last_updated_at":          row.last_updated_at,
+        "is_delayed":               _is_delayed(row, now),
     }
 
 
@@ -353,14 +581,12 @@ def get_scanner_summary(session: Session, fleet: "ScannerFleet") -> list[dict]:
     Includes:
     - Scanners that appear in the DB (even if not in fleet config)
     - Enabled scanners from the fleet config with zero counts
-      (so the UI can show configured scanners even before uploads arrive)
 
     Disabled scanners from the fleet config are only included when they have
     actual data in the queue.
     """
     now = _now()
 
-    # ── Aggregate counts from DB ──────────────────────────────────────────────
     rows = session.execute(
         select(
             EstimatedUploadQueue.scanner_id,
@@ -386,16 +612,13 @@ def get_scanner_summary(session: Session, fleet: "ScannerFleet") -> list[dict]:
         if row.estimated_upload_at and row.estimated_upload_at < now and s not in _TERMINAL_STATUSES:
             c["delayed"] += 1
 
-    # ── Seed enabled fleet scanners that have no DB data yet ─────────────────
     for entry in fleet.enabled():
         if entry.scanner_id not in counts:
             counts[entry.scanner_id] = {"queued": 0, "active": 0, "failed": 0, "delayed": 0, "total": 0}
 
-    # ── Build result dicts ────────────────────────────────────────────────────
     result: list[dict] = []
     for sid, c in counts.items():
         entry = fleet.get(sid)
-        # Include disabled fleet scanner only when it has actual data
         if entry is not None and not entry.enabled and c["total"] == 0:
             continue
         result.append({

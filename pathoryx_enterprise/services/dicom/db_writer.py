@@ -94,9 +94,13 @@ class DICOMDBWriter:
         artifact_id = global_artifact_id or trigger.global_artifact_id
 
         # Resolve source_path: prefer explicit arg, fall back to trigger payload
-        resolved_source = source_path or (
-            (trigger.trigger_payload_json or {}).get("source_path")
-        )
+        _payload = trigger.trigger_payload_json or {}
+        resolved_source = source_path or _payload.get("source_path")
+        # Propagate priority from incoming trigger payload (set by BabelShark/QC)
+        _priority = int(_payload.get("priority", trigger.priority if hasattr(trigger, "priority") else 5))
+        _priority_source = str(_payload.get("priority_source", "default"))
+        _watch_folder_path = _payload.get("watch_folder_path")
+        _watch_folder_label = _payload.get("watch_folder_label")
 
         # 1. Write dicomizer.conversion_results
         idempotency_key = deterministic_artifact_id(
@@ -144,8 +148,7 @@ class DICOMDBWriter:
         # 3. Mark own trigger completed
         self._trigger_repo.mark_completed(trigger=trigger)
 
-        # 4. Enqueue upload_service trigger (unconditional — no FileRecord required)
-        #    Payload gives upload_service everything it needs to run storescu.
+        # 4. Enqueue upload_service trigger — include priority so dequeue ordering works
         upload_trigger, _ = self._trigger_repo.enqueue(
             source_service=SERVICE_NAME,
             target_service="upload_service",
@@ -154,11 +157,16 @@ class DICOMDBWriter:
             global_artifact_id=artifact_id,
             correlation_id=correlation_id,
             runner_id=runner_id,
+            priority=_priority,
             payload={
                 "dicom_path": output_path,
                 "source_path": resolved_source or "",
                 "global_artifact_id": artifact_id,
                 "scanner_id": scanner_id,
+                "priority": _priority,
+                "priority_source": _priority_source,
+                "watch_folder_path": _watch_folder_path,
+                "watch_folder_label": _watch_folder_label,
             },
         )
 
@@ -169,6 +177,10 @@ class DICOMDBWriter:
             file_record=record,
             scanner_id=scanner_id,
             file_size=input_file_size,
+            priority=_priority,
+            priority_source=_priority_source,
+            watch_folder_path=_watch_folder_path,
+            watch_folder_label=_watch_folder_label,
         )
 
         # 5. Event
@@ -206,6 +218,10 @@ class DICOMDBWriter:
         file_record: FileRecord | None,
         scanner_id: str | None,
         file_size: int | None,
+        priority: int = 5,
+        priority_source: str = "default",
+        watch_folder_path: str | None = None,
+        watch_folder_label: str | None = None,
     ) -> None:
         """Insert a 'queued' row into estimated_upload_queue on upload trigger dispatch."""
         if file_record is None:
@@ -219,12 +235,17 @@ class DICOMDBWriter:
         stmt = (
             pg_insert(EstimatedUploadQueue)
             .values(
+                file_record_internal_id=file_record.internal_id,
                 filename=filename,
                 scanner_id=scanner_id or file_record.scanner_id,
                 queued_at=queued_at,
                 estimated_upload_at=queued_at + timedelta(minutes=10),
                 upload_status="queued",
                 file_size_bytes=file_size or file_record.file_size,
+                priority=priority,
+                priority_source=priority_source,
+                watch_folder_path=watch_folder_path,
+                watch_folder_label=watch_folder_label,
                 last_updated_at=now,
             )
             .on_conflict_do_nothing(constraint="uq_euq_filename_queued_at")

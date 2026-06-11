@@ -12,6 +12,7 @@ import { RecoveryCenter } from './pages/RecoveryCenter'
 import { SlideDetail } from './pages/SlideDetail'
 import { SlideExplorer } from './pages/SlideExplorer'
 import { UploadOperations } from './pages/UploadOperations'
+import { RoutingControlCenter } from './pages/RoutingControlCenter'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,6 +47,7 @@ export default function App() {
                     <Route path="/operations"          element={<OperationsCenter />} />
                     <Route path="/uploads"             element={<UploadOperations />} />
                     <Route path="/computer-core"       element={<ComputerCore />} />
+                    <Route path="/routing"            element={<RoutingControlCenter />} />
                   </Routes>
                 </Shell>
               }

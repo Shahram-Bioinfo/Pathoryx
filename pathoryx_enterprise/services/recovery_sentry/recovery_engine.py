@@ -283,6 +283,7 @@ def _persist_recovery(
     from sqlalchemy import select
 
     from pathoryx_enterprise.db.models.core import FileRecord
+    from pathoryx_enterprise.db.models.upload_tracking import EstimatedUploadQueue
 
     now = utc_now()
 
@@ -347,6 +348,21 @@ def _persist_recovery(
             resolved_fr_id = record.internal_id
             resolved_artifact_id = record.global_artifact_id or artifact_id
 
+            # ── Step 1b: preserve priority from existing upload queue row ────
+            # If this file was previously queued, carry its priority forward
+            # so operator-set or watch-folder priority survives the recovery
+            # cycle. Fall back to 5 (normal) for first-time recoveries.
+            existing_queue_row = session.execute(
+                select(EstimatedUploadQueue).where(
+                    EstimatedUploadQueue.file_record_internal_id == resolved_fr_id
+                )
+            ).scalar_one_or_none()
+            recovered_priority: int = (
+                existing_queue_row.priority
+                if existing_queue_row is not None
+                else 5
+            )
+
             # ── Step 2: idempotent QC trigger ────────────────────────────────
             # Include source_path so downstream services (QC → DICOM) can
             # resolve the WSI file without an extra FileRecord DB lookup.
@@ -358,6 +374,7 @@ def _persist_recovery(
                 global_artifact_id=resolved_artifact_id,
                 correlation_id=correlation_id,
                 runner_id=runner_id,
+                priority=recovered_priority,
                 payload={
                     "source_path": dest_canonical,
                     "global_artifact_id": resolved_artifact_id,
@@ -366,6 +383,12 @@ def _persist_recovery(
                     "source_service": SERVICE_NAME,
                     "case_id": parsed.case_id,
                     "slide_id": slide_id_final,
+                    "priority": recovered_priority,
+                    "priority_source": (
+                        existing_queue_row.priority_source
+                        if existing_queue_row is not None
+                        else "default"
+                    ),
                 },
             )
 

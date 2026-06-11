@@ -24,6 +24,17 @@ class EstimatedUploadQueue(Base):
       uploaded    — completed successfully
       delayed     — ETA exceeded, still pending
       failed      — terminal failure
+
+    Priority:
+      0 = STAT / Upload Next
+      1 = High Priority (watch-folder-driven or manual)
+      5 = Normal (default)
+      9 = Low Priority
+
+    priority_source:
+      'default'      — no explicit assignment
+      'watch_folder' — inherited from watch folder config at intake
+      'file'         — manually set by operator via dashboard
     """
 
     __tablename__ = "estimated_upload_queue"
@@ -37,10 +48,14 @@ class EstimatedUploadQueue(Base):
         Index("ix_euq_scanner",       "scanner_id"),
         Index("ix_euq_last_updated",  "last_updated_at"),
         Index("ix_euq_status_queued", "upload_status", "queued_at"),
+        Index("ix_euq_priority",      "upload_status", "priority", "queued_at"),
         {"schema": "upload_tracking"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    # Link back to core.file_records for trigger sync on priority update
+    file_record_internal_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     slide_id: Mapped[Optional[str]] = mapped_column(Text)
     filename: Mapped[str] = mapped_column(Text, nullable=False)
@@ -57,7 +72,18 @@ class EstimatedUploadQueue(Base):
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     file_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger)
+
+    # Priority (0=STAT, 1=high, 5=normal, 9=low)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
+    priority_source: Mapped[str] = mapped_column(Text, nullable=False, server_default="default")
+    priority_reason: Mapped[Optional[str]] = mapped_column(Text)
+    priority_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    priority_updated_by: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Watch folder audit
+    watch_folder_path: Mapped[Optional[str]] = mapped_column(Text)
+    watch_folder_label: Mapped[Optional[str]] = mapped_column(Text)
+
     upload_speed_mbps: Mapped[Optional[float]] = mapped_column(Float)
     failure_reason: Mapped[Optional[str]] = mapped_column(Text)
 

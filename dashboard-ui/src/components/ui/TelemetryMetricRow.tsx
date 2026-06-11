@@ -1,54 +1,55 @@
 import { useFlashOnChange } from '../../hooks/useFlashOnChange'
-
-/*
- * TelemetryMetricRow — replaces isolated KpiCard grids with a unified
- * operational instrument panel.
- *
- * Design rationale vs. KpiCard:
- *
- *   KpiCard: each metric is a standalone "card" with its own shadow, hover,
- *   accent gradient, and icon — equal-weight BI dashboard aesthetics.
- *
- *   TelemetryMetricRow: all metrics share one glass surface; cells are
- *   separated only by thin lines — an instrument cluster, not a widget grid.
- *   Values are 18 px (vs. KpiCard's 28 px) — readout values, not hero numbers.
- *   No per-cell shadow, hover, or decorative accent lines.
- *
- * Layout: up to 4 metrics per row. For 5–8 metrics, rows wrap automatically.
- * Each row is a grid of cells; rows are separated by a 1 px horizontal line.
- *
- * Flash: values call useFlashOnChange so they still signal data updates —
- * the same kpiFlash keyframe fires, but on a smaller number so it reads
- * as "telemetry refresh" rather than "dashboard update".
- */
+import { useTheme } from '../layout/ThemeProvider'
 
 export interface TelemetryMetric {
   key:     string
   label:   string
   value:   string
-  /** Optional subtext beneath the value (small, faint). */
   sub?:    string
-  /** CSS color or var() for non-default (warning/error/success) states. */
   accent?: string
   loading?: boolean
 }
 
 interface Props {
-  metrics:  TelemetryMetric[]
-  /** Cells per row. Defaults to min(4, metrics.length). */
-  columns?: 2 | 3 | 4 | 6
+  metrics:   TelemetryMetric[]
+  columns?:  2 | 3 | 4 | 6
   className?: string
 }
 
-// ── Individual cell (hook must be in its own component) ──────────────────────
+// ── LCARS cell ────────────────────────────────────────────────────────────────
 
-function MetricCell({
+function LCARSCell({ metric }: { metric: TelemetryMetric }) {
+  const isFlashing = useFlashOnChange(metric.loading ? '—' : metric.value)
+
+  return (
+    <div className={`lc-telemetry-cell${isFlashing ? ' flashing' : ''}`}>
+      <span className="lc-telemetry-label">{metric.label}</span>
+      {metric.loading ? (
+        <div className="ops-skeleton" style={{ height: 22, width: 56, borderRadius: 0 }} />
+      ) : (
+        <span
+          className="lc-telemetry-value"
+          style={metric.accent ? { color: metric.accent } : undefined}
+        >
+          {metric.value}
+        </span>
+      )}
+      {metric.sub && (
+        <span className="lc-telemetry-sub">{metric.sub}</span>
+      )}
+    </div>
+  )
+}
+
+// ── Modern cell ───────────────────────────────────────────────────────────────
+
+function ModernCell({
   metric,
   borderRight,
   borderBottom,
 }: {
-  metric:      TelemetryMetric
-  borderRight: boolean
+  metric:       TelemetryMetric
+  borderRight:  boolean
   borderBottom: boolean
 }) {
   const isFlashing = useFlashOnChange(metric.loading ? '—' : metric.value)
@@ -62,7 +63,6 @@ function MetricCell({
         minWidth: 0,
       }}
     >
-      {/* Label — 9 px monospace, wide tracking, faint */}
       <span
         className="text-[9px] font-mono tracking-[0.18em] uppercase leading-none truncate"
         style={{ color: 'var(--text-faint)' }}
@@ -70,7 +70,6 @@ function MetricCell({
         {metric.label}
       </span>
 
-      {/* Value */}
       {metric.loading ? (
         <div className="ops-skeleton h-[18px] w-14 rounded mt-0.5" />
       ) : (
@@ -86,7 +85,6 @@ function MetricCell({
         </span>
       )}
 
-      {/* Subtext */}
       {metric.sub && (
         <span
           className="text-[9px] leading-none truncate"
@@ -102,9 +100,19 @@ function MetricCell({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function TelemetryMetricRow({ metrics, columns = 4, className }: Props) {
-  const cols = Math.min(columns, metrics.length)
+  const { isLCARS } = useTheme()
 
-  // Split metrics into rows of `cols`
+  if (isLCARS) {
+    return (
+      <div className={`lc-telemetry-strip ${className ?? ''}`}>
+        {metrics.map(m => (
+          <LCARSCell key={m.key} metric={m} />
+        ))}
+      </div>
+    )
+  }
+
+  const cols = Math.min(columns, metrics.length)
   const rows: TelemetryMetric[][] = []
   for (let i = 0; i < metrics.length; i += cols) {
     rows.push(metrics.slice(i, i + cols))
@@ -119,12 +127,10 @@ export function TelemetryMetricRow({ metrics, columns = 4, className }: Props) {
         <div
           key={ri}
           className="grid"
-          style={{
-            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-          }}
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         >
           {rowItems.map((m, ci) => (
-            <MetricCell
+            <ModernCell
               key={m.key}
               metric={m}
               borderRight={ci < rowItems.length - 1}

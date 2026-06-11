@@ -609,6 +609,7 @@ export type UploadStatus = 'queued' | 'estimating' | 'uploading' | 'uploaded' | 
 
 export interface UploadQueueItem {
   id: number
+  file_record_internal_id: number | null
   slide_id: string | null
   filename: string
   scanner_id: string | null
@@ -620,7 +621,14 @@ export interface UploadQueueItem {
   upload_status: UploadStatus
   retry_count: number
   file_size_bytes: number | null
+  // Priority: 0=UPLOAD_NEXT, 1=HIGH, 5=NORMAL
   priority: number
+  priority_source: 'default' | 'watch_folder' | 'manual' | 'upload_next'
+  priority_reason: string | null
+  priority_updated_at: string | null
+  priority_updated_by: string | null
+  watch_folder_path: string | null
+  watch_folder_label: string | null
   upload_speed_mbps: number | null
   failure_reason: string | null
   last_updated_at: string
@@ -647,6 +655,20 @@ export interface UploadMetrics {
 export interface UploadFilterOptions {
   scanners: string[]
   hosts: string[]
+  priorities: number[]
+}
+
+export interface WatchFolderPrioritySummary {
+  watch_folder_path: string
+  watch_folder_label: string
+  priority: number
+  queued_count: number
+}
+
+export interface UploadPrioritySummary {
+  by_priority: { upload_next: number; high: number; normal: number }
+  by_source: { manual: number; watch_folder: number; upload_next: number; default: number }
+  watch_folders: WatchFolderPrioritySummary[]  // only HIGH folders
 }
 
 export interface UploadIngestRecord {
@@ -677,8 +699,7 @@ export interface UploadIngestResponse {
 }
 
 export interface UploadPriorityRequest {
-  /** 0 = upload_next, 5 = normal, 9 = low */
-  priority: number
+  mode: 'upload_next' | 'high' | 'normal' | 'clear_upload_next'
   reason?: string
 }
 
@@ -826,3 +847,144 @@ export interface ScannerSummaryResponse {
 
 /** Lookup map: scanner_id → display_name */
 export type ScannerMap = Record<string, string>
+
+// ── Phase 4.8 — Routing Policy Engine ────────────────────────────────────────
+
+export interface ScannerDestinationItem {
+  scanner_id: string
+  destination: string
+}
+
+export interface RoutingModeInfo {
+  name: string
+  profile: string
+  default_destination: string
+  active_start: string
+  active_end: string
+  is_overnight: boolean
+  is_active: boolean
+  scanner_destinations: ScannerDestinationItem[]
+}
+
+export interface ColorDotRule {
+  color: string
+  destination: string
+}
+
+export interface RoutingValidationIssue {
+  severity: 'error' | 'warning'
+  message: string
+  field: string | null
+}
+
+export interface NextModeInfo {
+  name: string
+  starts_at: string
+}
+
+export interface RoutingStatusResponse {
+  active_mode: string | null
+  active_profile: string | null
+  active_default_destination: string | null
+  next_mode: NextModeInfo | null
+  timezone: string
+  dry_run: boolean
+  fallback_destination: string
+  modes: RoutingModeInfo[]
+  color_dot_rules: ColorDotRule[]
+  validation_issues: RoutingValidationIssue[]
+  as_of: string
+}
+
+export interface RoutingOverrideItem {
+  id: number
+  created_at: string
+  created_by: string | null
+  reason: string | null
+  target_type: string
+  target_value: string
+  destination: string
+  expires_at: string | null
+  is_active: boolean
+}
+
+export interface RoutingOverridesResponse {
+  active: RoutingOverrideItem[]
+  all: RoutingOverrideItem[]
+  total_active: number
+  as_of: string
+}
+
+export interface CreateOverrideRequest {
+  target_type: 'scanner' | 'file' | 'case'
+  target_value: string
+  destination: string
+  expires_at?: string | null
+  reason?: string | null
+  created_by?: string | null
+}
+
+export interface RoutingPreviewItem {
+  slide_id: string | null
+  original_filename: string | null
+  scanner_id: string | null
+  scanner_name: string | null
+  color_dot: string | null
+  current_status: string | null
+  predicted_destination: string
+  routing_reason: string
+  mode: string | null
+  profile: string | null
+  override_id: number | null
+}
+
+export interface RoutingPreviewResponse {
+  items: RoutingPreviewItem[]
+  total: number
+  active_mode: string | null
+  dry_run: boolean
+  as_of: string
+}
+
+export interface RoutingDecisionItem {
+  id: number
+  created_at: string
+  slide_id: string | null
+  scanner_id: string | null
+  mode: string | null
+  profile: string | null
+  color_dot: string | null
+  color_dot_confidence: number | null
+  destination: string
+  routing_reason: string
+  override_id: number | null
+  dry_run: boolean
+}
+
+export interface RoutingDecisionsResponse {
+  items: RoutingDecisionItem[]
+  total: number
+  stats: Record<string, unknown>
+  as_of: string
+}
+
+export interface DecisionChainStep {
+  step: number
+  label: string
+  applied: boolean
+  value: string | null
+  detail: string | null
+}
+
+export interface DecisionChainResponse {
+  decision_id: number
+  slide_id: string | null
+  scanner_id: string | null
+  mode: string | null
+  color_dot: string | null
+  final_destination: string
+  final_reason: string
+  dry_run: boolean
+  chain: DecisionChainStep[]
+  as_of: string
+}

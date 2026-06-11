@@ -295,6 +295,9 @@ class ServiceTrigger(Base, TimestampMixin):
     correlation_id: Mapped[Optional[str]] = mapped_column(Text)
     otel_trace_id: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Upload priority — lower number = higher priority; only used by upload_service dequeue
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
+
     # Multi-machine: which runner claimed this trigger
     claimed_by_runner_id: Mapped[Optional[str]] = mapped_column(Text)
     claimed_by_host_id: Mapped[Optional[str]] = mapped_column(Text)

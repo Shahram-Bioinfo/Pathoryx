@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +822,7 @@ class UploadVelocityResponse(BaseModel):
 
 class UploadQueueItem(BaseModel):
     id: int
+    file_record_internal_id: Optional[int] = None
     slide_id: Optional[str] = None
     filename: str
     scanner_id: Optional[str] = None
@@ -833,7 +834,14 @@ class UploadQueueItem(BaseModel):
     upload_status: str
     retry_count: int
     file_size_bytes: Optional[int] = None
+    # Priority (0=STAT, 1=high, 5=normal, 9=low)
     priority: int
+    priority_source: str = "default"
+    priority_reason: Optional[str] = None
+    priority_updated_at: Optional[datetime] = None
+    priority_updated_by: Optional[str] = None
+    watch_folder_path: Optional[str] = None
+    watch_folder_label: Optional[str] = None
     upload_speed_mbps: Optional[float] = None
     failure_reason: Optional[str] = None
     last_updated_at: datetime
@@ -895,13 +903,35 @@ class UploadQueueUpdateRequest(BaseModel):
 
 
 class UploadPriorityRequest(BaseModel):
-    priority: int  # 0=upload_next, 5=normal, 9=low
+    # Operator-friendly mode string; backend maps to internal numeric priority.
+    # upload_next=0, high=1, normal=5, clear_upload_next restores pre-flag level.
+    mode: str  # "upload_next" | "high" | "normal" | "clear_upload_next"
     reason: Optional[str] = None
+
+
+VALID_PRIORITY_MODES = frozenset({"upload_next", "high", "normal", "clear_upload_next"})
 
 
 class UploadFilterOptions(BaseModel):
     scanners: list[str]
     hosts: list[str]
+    priorities: list[int] = [0, 1, 5]
+
+
+class WatchFolderPrioritySummary(BaseModel):
+    watch_folder_path: str
+    watch_folder_label: str
+    priority: int
+    queued_count: int
+
+
+class UploadPrioritySummary(BaseModel):
+    # by_priority keys: "upload_next", "high", "normal"
+    by_priority: dict
+    # by_source keys: "manual", "watch_folder", "upload_next", "default"
+    by_source: dict
+    # Only HIGH (priority=1) watch folders are included
+    watch_folders: list[WatchFolderPrioritySummary]
 
 
 # ---------------------------------------------------------------------------
@@ -944,4 +974,156 @@ class ScannerSummaryItem(BaseModel):
 
 class ScannerSummaryResponse(BaseModel):
     scanners: list[ScannerSummaryItem]
+    as_of: datetime
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.8 — Routing Policy Engine
+# ---------------------------------------------------------------------------
+
+
+class ScannerDestinationItem(BaseModel):
+    scanner_id: str
+    destination: str
+
+
+class RoutingModeInfo(BaseModel):
+    name: str
+    profile: str
+    default_destination: str
+    active_start: str
+    active_end: str
+    is_overnight: bool
+    is_active: bool
+    scanner_destinations: list[ScannerDestinationItem]
+
+
+class ColorDotRule(BaseModel):
+    color: str
+    destination: str
+
+
+class ValidationIssueItem(BaseModel):
+    severity: str
+    message: str
+    field: Optional[str] = None
+
+
+class NextModeInfo(BaseModel):
+    name: str
+    starts_at: str
+
+
+class RoutingStatusResponse(BaseModel):
+    active_mode: Optional[str] = None
+    active_profile: Optional[str] = None
+    active_default_destination: Optional[str] = None
+    next_mode: Optional[NextModeInfo] = None
+    timezone: str
+    dry_run: bool
+    fallback_destination: str
+    modes: list[RoutingModeInfo]
+    color_dot_rules: list[ColorDotRule]
+    validation_issues: list[ValidationIssueItem]
+    as_of: str
+
+
+class RoutingOverrideItem(BaseModel):
+    id: int
+    created_at: datetime
+    created_by: Optional[str] = None
+    reason: Optional[str] = None
+    target_type: str
+    target_value: str
+    destination: str
+    expires_at: Optional[datetime] = None
+    is_active: bool
+
+
+class RoutingOverridesResponse(BaseModel):
+    active: list[RoutingOverrideItem]
+    all: list[RoutingOverrideItem]
+    total_active: int
+    as_of: datetime
+
+
+class CreateOverrideRequest(BaseModel):
+    target_type: str
+    target_value: str
+    destination: str
+    expires_at: Optional[datetime] = None
+    reason: Optional[str] = None
+    created_by: Optional[str] = None
+
+    @field_validator("target_type")
+    @classmethod
+    def validate_target_type(cls, v: str) -> str:
+        allowed = {"scanner", "file", "case"}
+        if v not in allowed:
+            raise ValueError(f"target_type must be one of {allowed}")
+        return v
+
+
+class RoutingPreviewItem(BaseModel):
+    slide_id: Optional[str] = None
+    original_filename: Optional[str] = None
+    scanner_id: Optional[str] = None
+    scanner_name: Optional[str] = None
+    color_dot: Optional[str] = None
+    current_status: Optional[str] = None
+    predicted_destination: str
+    routing_reason: str
+    mode: Optional[str] = None
+    profile: Optional[str] = None
+    override_id: Optional[int] = None
+
+
+class RoutingPreviewResponse(BaseModel):
+    items: list[RoutingPreviewItem]
+    total: int
+    active_mode: Optional[str] = None
+    dry_run: bool
+    as_of: datetime
+
+
+class RoutingDecisionItem(BaseModel):
+    id: int
+    created_at: datetime
+    slide_id: Optional[str] = None
+    scanner_id: Optional[str] = None
+    mode: Optional[str] = None
+    profile: Optional[str] = None
+    color_dot: Optional[str] = None
+    color_dot_confidence: Optional[float] = None
+    destination: str
+    routing_reason: str
+    override_id: Optional[int] = None
+    dry_run: bool
+
+
+class DecisionChainStep(BaseModel):
+    step: int
+    label: str
+    applied: bool
+    value: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class DecisionChainResponse(BaseModel):
+    decision_id: int
+    slide_id: Optional[str] = None
+    scanner_id: Optional[str] = None
+    mode: Optional[str] = None
+    color_dot: Optional[str] = None
+    final_destination: str
+    final_reason: str
+    dry_run: bool
+    chain: list[DecisionChainStep]
+    as_of: datetime
+
+
+class RoutingDecisionsResponse(BaseModel):
+    items: list[RoutingDecisionItem]
+    total: int
+    stats: dict[str, Any]
     as_of: datetime

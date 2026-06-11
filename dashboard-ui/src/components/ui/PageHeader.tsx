@@ -1,26 +1,45 @@
 import type { ReactNode } from 'react'
-
-/*
- * PageHeader — operational page identifier.
- *
- * Design notes for this revision:
- *   - mb-8 → mb-5: the previous 32px gap was SaaS-app whitespace.
- *     Mission consoles prioritize vertical scan density.
- *   - text-2xl → text-xl: 24px hero titles read as marketing copy.
- *     20px keeps clear hierarchy without competing with content.
- *   - Decorative accent underline removed: the gradient rule below the
- *     title was a SaaS landing page pattern. The accent tag above the
- *     title already supplies color identity.
- */
+import { useTheme } from '../layout/ThemeProvider'
 
 interface Props {
-  title: string
+  title:     string
   subtitle?: string
-  actions?: ReactNode
-  tag?: string
+  actions?:  ReactNode
+  tag?:      string
 }
 
 export function PageHeader({ title, subtitle, actions, tag }: Props) {
+  const { isLCARS } = useTheme()
+
+  if (isLCARS) {
+    return (
+      <div className="lc-page-hdr">
+        {/* Title capsule pill */}
+        <div className="lc-page-hdr-pill">
+          {title}
+        </div>
+
+        {/* Sub-labels */}
+        {(tag || subtitle) && (
+          <div className="lc-page-hdr-sub">
+            {tag && <span>{tag}</span>}
+            {tag && subtitle && <span className="lc-page-hdr-sep">▪</span>}
+            {subtitle && <span>{subtitle}</span>}
+          </div>
+        )}
+
+        {/* Right side: actions + status */}
+        <div className="lc-page-hdr-meta">
+          {actions}
+          <span className="lc-page-hdr-status">
+            <span className="lc-page-hdr-status-dot" aria-hidden />
+            ONLINE
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-start justify-between mb-5">
       <div>
@@ -39,7 +58,10 @@ export function PageHeader({ title, subtitle, actions, tag }: Props) {
           {title}
         </h1>
         {subtitle && (
-          <p className="text-[10px] mt-0.5 font-mono" style={{ color: 'var(--text-faint)', letterSpacing: '0.04em' }}>
+          <p
+            className="text-[10px] mt-0.5 font-mono"
+            style={{ color: 'var(--text-faint)', letterSpacing: '0.04em' }}
+          >
             {subtitle}
           </p>
         )}

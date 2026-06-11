@@ -1,7 +1,6 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { DOT_HEX_DARK, DOT_HEX_LIGHT, statusVariant } from '../../utils/colors'
+import { DOT_HEX_DARK, statusVariant } from '../../utils/colors'
 import { fmtStatusLabel } from '../../utils/formatters'
-import { useTheme } from '../layout/ThemeProvider'
 
 const TOOLTIP_STYLE = {
   background: 'var(--tooltip-bg)',
@@ -14,15 +13,14 @@ const TOOLTIP_STYLE = {
 interface Props { byStatus: Record<string, number>; total: number }
 
 export function StatusDonut({ byStatus, total }: Props) {
-  const { theme } = useTheme()
-  const hex = theme === 'dark' ? DOT_HEX_DARK : DOT_HEX_LIGHT
+  const hex = DOT_HEX_DARK
 
   const data = Object.entries(byStatus)
     .filter(([, v]) => v > 0)
     .map(([status, count]) => ({
       name:  fmtStatusLabel(status),
       value: count,
-      color: hex[statusVariant(status)] ?? (theme === 'dark' ? '#64748b' : '#94a3b8'),
+      color: hex[statusVariant(status)] ?? '#64748b',
     }))
 
   return (

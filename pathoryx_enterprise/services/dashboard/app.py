@@ -93,7 +93,9 @@ from .schemas import (
     UploadIngestRequest,
     UploadIngestResponse,
     UploadMetrics,
+    UploadPrioritySummary,
     UploadPriorityRequest,
+    VALID_PRIORITY_MODES,
     UploadQueueItem,
     UploadQueueResponse,
     UploadQueueUpdateRequest,
@@ -101,6 +103,17 @@ from .schemas import (
     ValidationIssue,
     WatchFolderSummary,
     WatchFoldersResponse,
+    # Phase 4.8 — Routing
+    CreateOverrideRequest,
+    DecisionChainResponse,
+    DecisionChainStep,
+    RoutingDecisionItem,
+    RoutingDecisionsResponse,
+    RoutingOverrideItem,
+    RoutingOverridesResponse,
+    RoutingPreviewItem,
+    RoutingPreviewResponse,
+    RoutingStatusResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -372,8 +385,8 @@ def _label_cache_dir(cfg: dict) -> Path:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Palantir Dashboard API",
-        description="Read-only observability API for the Palantir Enterprise pipeline.",
+        title="DPARS Dashboard API",
+        description="Read-only observability API for the DPARS Enterprise pipeline.",
         version="1.0.0",
         docs_url="/dashboard/docs",
         redoc_url="/dashboard/redoc",
@@ -390,7 +403,7 @@ def create_app() -> FastAPI:
             "http://localhost:5174",
             "http://127.0.0.1:5174",
         ],
-        allow_methods=["GET", "POST", "PATCH"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Accept"],
     )
 
@@ -974,7 +987,7 @@ def create_app() -> FastAPI:
     )
     def validate_filename(body: FilenameValidationRequest) -> FilenameValidationResponse:
         """
-        Validate a proposed filename against the Palantir slide ID rules.
+        Validate a proposed filename against the DPARS slide ID rules.
 
         Safe to call on every keystroke — no filesystem or DB side-effects.
         Returns structured components and any stain-canonical normalized form.
@@ -1396,6 +1409,7 @@ def create_app() -> FastAPI:
         search: Annotated[Optional[str], Query(description="Filename/slide_id substring")] = None,
         from_date: Annotated[Optional[datetime], Query()] = None,
         to_date: Annotated[Optional[datetime], Query()] = None,
+        priority_filter: Annotated[Optional[int], Query(description="0=STAT|1=high|5=normal|9=low")] = None,
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     ) -> UploadQueueResponse:
@@ -1408,6 +1422,7 @@ def create_app() -> FastAPI:
                 search=search,
                 from_date=from_date,
                 to_date=to_date,
+                priority_filter=priority_filter,
                 page=page,
                 page_size=page_size,
             )
@@ -1507,10 +1522,16 @@ def create_app() -> FastAPI:
         record_id: int,
         body: UploadPriorityRequest,
     ) -> UploadQueueItem:
-        if not (0 <= body.priority <= 9):
-            raise HTTPException(status_code=422, detail="Priority must be between 0 and 9")
+        if body.mode not in VALID_PRIORITY_MODES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid mode '{body.mode}'. Allowed: {sorted(VALID_PRIORITY_MODES)}",
+            )
         try:
-            result = uq.update_upload_priority(db, record_id, body.priority)
+            result = uq.update_upload_priority_mode(
+                db, record_id, body.mode,
+                updated_by="operator",
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
@@ -1519,6 +1540,35 @@ def create_app() -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="Upload record not found")
         return UploadQueueItem(**result)
+
+    @app.get(
+        "/dashboard/api/uploads/priorities",
+        response_model=UploadPrioritySummary,
+        summary="Priority distribution and watch folder summary",
+    )
+    def upload_priorities(db: DbDep) -> UploadPrioritySummary:
+        try:
+            data = uq.get_priority_summary(db)
+        except Exception as exc:
+            logger.warning("upload_priorities: query failed: %s", exc)
+            data = {"by_priority": {}, "by_source": {}, "watch_folders": []}
+        return UploadPrioritySummary(**data)
+
+    @app.get(
+        "/dashboard/api/uploads/next",
+        response_model=list[UploadQueueItem],
+        summary="Preview: next N items to be uploaded in priority order",
+    )
+    def upload_next_preview(
+        limit: Annotated[int, Query(ge=1, le=50, description="How many items to preview")] = 10,
+        db: DbDep = ...,
+    ) -> list[UploadQueueItem]:
+        try:
+            items = uq.get_next_uploads_preview(db, limit=limit)
+        except Exception as exc:
+            logger.warning("upload_next_preview: query failed: %s", exc)
+            items = []
+        return [UploadQueueItem(**item) for item in items]
 
     @app.get(
         "/dashboard/api/operations/db-health",
@@ -1668,6 +1718,334 @@ def create_app() -> FastAPI:
             **{k: v for k, v in data.items() if k != "daily_uploads_7d"},
             daily_uploads_7d=[DailyUploadCount(**d) for d in data.get("daily_uploads_7d", [])],
             as_of=datetime.now(tz=timezone.utc),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 4.8 — Routing Policy Engine endpoints
+    # ------------------------------------------------------------------
+
+    from .routing_queries import (
+        create_override as rq_create_override,
+        deactivate_override as rq_deactivate_override,
+        expire_stale_overrides as rq_expire_stale,
+        get_decision_by_id as rq_decision_by_id,
+        get_decision_stats as rq_decision_stats,
+        get_pending_slides_for_preview as rq_preview_slides,
+        list_active_overrides as rq_active_overrides,
+        list_all_overrides as rq_all_overrides,
+        list_recent_decisions as rq_recent_decisions,
+        record_decision as rq_record_decision,
+    )
+    from pathoryx_enterprise.services.routing import RoutingPolicyEngine
+
+    def _get_routing_engine() -> Optional[RoutingPolicyEngine]:
+        cfg = _load_babelshark_config()
+        policies = cfg.get("routing_policies")
+        if not policies:
+            return None
+        try:
+            return RoutingPolicyEngine(policies)
+        except Exception as exc:
+            logger.warning("routing engine init failed: %s", exc)
+            return None
+
+    @app.get(
+        "/dashboard/api/routing/status",
+        response_model=RoutingStatusResponse,
+        summary="Routing Policy Engine — current mode, config, validation",
+        tags=["routing"],
+    )
+    def routing_status() -> RoutingStatusResponse:
+        engine = _get_routing_engine()
+        if engine is None:
+            return RoutingStatusResponse(
+                active_mode=None, active_profile=None,
+                active_default_destination=None, next_mode=None,
+                timezone="UTC", dry_run=True, fallback_destination="",
+                modes=[], color_dot_rules=[], validation_issues=[
+                    {"severity": "error",
+                     "message": "routing_policies section missing from babelshark_config.yaml",
+                     "field": "routing_policies"},
+                ],
+                as_of=datetime.now(tz=timezone.utc).isoformat(),
+            )
+        summary = engine.get_status_summary()
+        return RoutingStatusResponse(**summary)
+
+    @app.get(
+        "/dashboard/api/routing/preview",
+        response_model=RoutingPreviewResponse,
+        summary="Routing Policy Engine — predicted destinations for pending slides",
+        tags=["routing"],
+    )
+    def routing_preview(
+        db: DbDep,
+        limit: int = Query(100, ge=1, le=500),
+    ) -> RoutingPreviewResponse:
+        now = datetime.now(tz=timezone.utc)
+        engine = _get_routing_engine()
+
+        try:
+            rq_expire_stale(db)
+            active_overrides = rq_active_overrides(db)
+        except Exception as exc:
+            logger.warning("routing_preview: DB error: %s", exc)
+            active_overrides = []
+
+        try:
+            slides = rq_preview_slides(db, limit=limit)
+        except Exception as exc:
+            logger.warning("routing_preview: slides query failed: %s", exc)
+            slides = []
+
+        items: list[RoutingPreviewItem] = []
+        for slide in slides:
+            if engine is None:
+                items.append(RoutingPreviewItem(
+                    slide_id=slide.get("global_artifact_id"),
+                    original_filename=slide.get("original_filename"),
+                    scanner_id=slide.get("scanner_id"),
+                    scanner_name=slide.get("scanner_name"),
+                    color_dot=slide.get("color_dot_detected"),
+                    current_status=slide.get("status"),
+                    predicted_destination="(no routing policy)",
+                    routing_reason="no_policy",
+                    mode=None, profile=None, override_id=None,
+                ))
+            else:
+                result = engine.get_routing_decision(
+                    scanner_id=slide.get("scanner_id"),
+                    color_dot=slide.get("color_dot_detected"),
+                    overrides=active_overrides,
+                    now=now,
+                    file_id=slide.get("global_artifact_id"),
+                )
+                items.append(RoutingPreviewItem(
+                    slide_id=slide.get("global_artifact_id"),
+                    original_filename=slide.get("original_filename"),
+                    scanner_id=slide.get("scanner_id"),
+                    scanner_name=slide.get("scanner_name"),
+                    color_dot=slide.get("color_dot_detected"),
+                    current_status=slide.get("status"),
+                    predicted_destination=result.destination,
+                    routing_reason=result.routing_reason,
+                    mode=result.mode,
+                    profile=result.profile,
+                    override_id=result.override_id,
+                ))
+
+        active_mode = engine.get_active_mode(now).name if engine else None
+        return RoutingPreviewResponse(
+            items=items,
+            total=len(items),
+            active_mode=active_mode,
+            dry_run=True,
+            as_of=now,
+        )
+
+    @app.get(
+        "/dashboard/api/routing/overrides",
+        response_model=RoutingOverridesResponse,
+        summary="Routing Policy Engine — active overrides",
+        tags=["routing"],
+    )
+    def routing_overrides(db: DbDep) -> RoutingOverridesResponse:
+        now = datetime.now(tz=timezone.utc)
+        try:
+            rq_expire_stale(db)
+            active = rq_active_overrides(db)
+            all_ov = rq_all_overrides(db, limit=50)
+        except Exception as exc:
+            logger.warning("routing_overrides: DB error: %s", exc)
+            active, all_ov = [], []
+        return RoutingOverridesResponse(
+            active=[RoutingOverrideItem(**o) for o in active],
+            all=[RoutingOverrideItem(**o) for o in all_ov],
+            total_active=len(active),
+            as_of=now,
+        )
+
+    @app.post(
+        "/dashboard/api/routing/override",
+        response_model=RoutingOverrideItem,
+        status_code=201,
+        summary="Routing Policy Engine — create a temporary override",
+        tags=["routing"],
+    )
+    def create_routing_override(
+        body: CreateOverrideRequest,
+        db: DbDep,
+    ) -> RoutingOverrideItem:
+        try:
+            row = rq_create_override(
+                db,
+                target_type=body.target_type,
+                target_value=body.target_value,
+                destination=body.destination,
+                expires_at=body.expires_at,
+                created_by=body.created_by,
+                reason=body.reason,
+            )
+        except Exception as exc:
+            logger.error("create_routing_override: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to create override")
+        return RoutingOverrideItem(**row)
+
+    @app.delete(
+        "/dashboard/api/routing/override/{override_id}",
+        status_code=204,
+        summary="Routing Policy Engine — deactivate an override",
+        tags=["routing"],
+    )
+    def delete_routing_override(override_id: int, db: DbDep) -> None:
+        try:
+            found = rq_deactivate_override(db, override_id)
+        except Exception as exc:
+            logger.error("delete_routing_override: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to deactivate override")
+        if not found:
+            raise HTTPException(status_code=404, detail="Override not found or already inactive")
+
+    @app.get(
+        "/dashboard/api/routing/decisions",
+        response_model=RoutingDecisionsResponse,
+        summary="Routing Policy Engine — audit trail of routing decisions",
+        tags=["routing"],
+    )
+    def routing_decisions(
+        db: DbDep,
+        limit: int = Query(100, ge=1, le=500),
+    ) -> RoutingDecisionsResponse:
+        now = datetime.now(tz=timezone.utc)
+        try:
+            decisions = rq_recent_decisions(db, limit=limit)
+            stats = rq_decision_stats(db)
+        except Exception as exc:
+            logger.warning("routing_decisions: DB error: %s", exc)
+            decisions, stats = [], {}
+        return RoutingDecisionsResponse(
+            items=[RoutingDecisionItem(**d) for d in decisions],
+            total=len(decisions),
+            stats=stats,
+            as_of=now,
+        )
+
+    @app.get(
+        "/dashboard/api/routing/decision/{decision_id}/chain",
+        response_model=DecisionChainResponse,
+        summary="Routing Policy Engine — decision chain for a specific slide decision",
+        tags=["routing"],
+    )
+    def routing_decision_chain(
+        decision_id: int,
+        db: DbDep,
+    ) -> DecisionChainResponse:
+        """
+        Explain the full routing decision chain for a recorded decision.
+
+        Returns each evaluation step (override → color dot → scanner policy →
+        mode default → fallback) with which step was applied and why.
+        """
+        now = datetime.now(tz=timezone.utc)
+        try:
+            dec = rq_decision_by_id(db, decision_id)
+        except Exception as exc:
+            logger.warning("routing_decision_chain: DB error: %s", exc)
+            dec = None
+        if dec is None:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Routing decision {decision_id} not found")
+
+        # Load current policy to reconstruct context
+        engine = _get_routing_engine()
+        cfg = _load_babelshark_config().get("routing_policies", {})
+        modes_cfg = cfg.get("modes", {})
+        color_rules_cfg = cfg.get("color_dot_rules", {})
+        fallback = cfg.get("fallback_destination")
+
+        scanner_id = dec.get("scanner_id")
+        color_dot = dec.get("color_dot")
+        mode_name = dec.get("mode")
+        override_id = dec.get("override_id")
+        final_reason = dec.get("routing_reason", "")
+        final_dest = dec.get("destination", "")
+
+        chain: list[DecisionChainStep] = []
+
+        # Step 1 — Override
+        override_applied = override_id is not None and "manual_override" in final_reason
+        chain.append(DecisionChainStep(
+            step=1,
+            label="Emergency Override",
+            applied=override_applied,
+            value=f"override #{override_id}" if override_applied else None,
+            detail=f"override_id={override_id}" if override_id else "No active override matched",
+        ))
+
+        # Step 2 — Color dot
+        color_dest = None
+        if color_dot and color_dot.lower() in color_rules_cfg:
+            rule = color_rules_cfg[color_dot.lower()]
+            color_dest = rule.get("destination") if isinstance(rule, dict) else rule
+        color_applied = "color_dot" in final_reason
+        chain.append(DecisionChainStep(
+            step=2,
+            label="Color Dot Rule",
+            applied=color_applied,
+            value=f"{color_dot} → {color_dest}" if color_dest else None,
+            detail=f"color={color_dot}" if color_dot else "No color dot detected",
+        ))
+
+        # Step 3 — Scanner policy in active mode
+        scanner_dest = None
+        if mode_name and scanner_id and mode_name in modes_cfg:
+            scd = modes_cfg[mode_name].get("scanner_destinations", {})
+            sc_entry = scd.get(scanner_id)
+            if sc_entry:
+                scanner_dest = sc_entry.get("destination") if isinstance(sc_entry, dict) else sc_entry
+        scanner_applied = "scanner_policy" in final_reason
+        chain.append(DecisionChainStep(
+            step=3,
+            label="Scanner Policy",
+            applied=scanner_applied,
+            value=f"{scanner_id} → {scanner_dest}" if scanner_dest else None,
+            detail=f"scanner={scanner_id}, mode={mode_name}" if scanner_id else "No scanner ID",
+        ))
+
+        # Step 4 — Mode default
+        mode_default = None
+        if mode_name and mode_name in modes_cfg:
+            mode_default = modes_cfg[mode_name].get("default_destination")
+        mode_applied = "mode_default" in final_reason
+        chain.append(DecisionChainStep(
+            step=4,
+            label="Mode Default",
+            applied=mode_applied,
+            value=f"{mode_name} → {mode_default}" if mode_default else None,
+            detail=f"mode={mode_name}" if mode_name else "No active mode",
+        ))
+
+        # Step 5 — Fallback
+        fallback_applied = final_reason == "fallback"
+        chain.append(DecisionChainStep(
+            step=5,
+            label="Global Fallback",
+            applied=fallback_applied,
+            value=fallback,
+            detail=f"fallback_destination={fallback}" if fallback else "No fallback configured",
+        ))
+
+        return DecisionChainResponse(
+            decision_id=decision_id,
+            slide_id=dec.get("slide_id"),
+            scanner_id=scanner_id,
+            mode=mode_name,
+            color_dot=color_dot,
+            final_destination=final_dest,
+            final_reason=final_reason,
+            dry_run=dec.get("dry_run", True),
+            chain=chain,
+            as_of=now,
         )
 
     return app

@@ -222,3 +222,62 @@ pasnet_validator:
   sqlite_auto_register: true
   ops_table: "WSI_Babel_Shark_ops"
   log_table: "WSI_Babel_Shark_pre_rename_pasnet_log"
+
+# ============================================================
+# Phase 4.8 — Routing Policy Engine (Stage 1: dry-run only)
+#
+# dry_run: true  →  Engine computes and audits decisions
+#                   but does NOT alter upload destinations.
+#                   Set to false only after Stage 1 validation.
+#
+# Scanner IDs must match scanner_fleet.yaml exactly:
+#   M40010    Resolute          (Leica Aperio GT450, lab-main)
+#   M40015    Avenger           (Leica Aperio GT450, lab-main)
+#   M40023    HomeOne           (Leica Aperio GT450, lab-secondary)
+#   M40024    Chimera           (Leica Aperio GT450, lab-secondary)
+#   SS12620R  StarDestroyer     (Leica Aperio GT450 RUO, lab-main)
+# ============================================================
+
+routing_policies:
+  dry_run: true
+  timezone: "Europe/Copenhagen"
+  fallback_destination: "clinical_pacs"
+  default_mode: "clinical_day"
+
+  modes:
+
+    clinical_day:
+      active:
+        start: "08:00"
+        end: "16:00"
+      profile: "clinical"
+      default_destination: "clinical_pacs"
+      scanner_destinations: {}
+
+    research_night:
+      active:
+        start: "16:00"
+        end: "07:00"
+      profile: "research"
+      default_destination: "research_storage"
+      scanner_destinations:
+        M40010:
+          destination: "research_storage_resolute"
+        M40015:
+          destination: "research_storage_avenger"
+        M40023:
+          destination: "research_storage_homeone"
+        M40024:
+          destination: "research_storage_chimera"
+        SS12620R:
+          destination: "research_storage_stardestroyer"
+
+  color_dot_rules:
+    red:
+      destination: "urgent_research"
+    blue:
+      destination: "research_project_blue"
+    green:
+      destination: "research_project_green"
+    yellow:
+      destination: "clinical_special"

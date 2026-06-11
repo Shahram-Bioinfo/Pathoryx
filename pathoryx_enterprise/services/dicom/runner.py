@@ -243,6 +243,7 @@ def run(settings: DICOMSettings) -> None:
                 target_service=SERVICE_NAME,
                 runner_id=runner_id,
                 host_id=host_id,
+                priority_aware=True,
             )
             depth = TriggerRepository(session).count_pending(target_service=SERVICE_NAME)
         trigger_queue_depth.labels(target_service=SERVICE_NAME).set(depth)

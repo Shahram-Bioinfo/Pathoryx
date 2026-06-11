@@ -1,12 +1,10 @@
-import { DOT_HEX_DARK, DOT_HEX_LIGHT, statusVariant } from '../../utils/colors'
+import { DOT_HEX_DARK, statusVariant } from '../../utils/colors'
 import { fmtStatusLabel } from '../../utils/formatters'
-import { useTheme } from '../layout/ThemeProvider'
 
 interface Props { byStatus: Record<string, number>; total: number }
 
 export function SlideStateRail({ byStatus, total }: Props) {
-  const { theme } = useTheme()
-  const hex = theme === 'dark' ? DOT_HEX_DARK : DOT_HEX_LIGHT
+  const hex = DOT_HEX_DARK
 
   const states = Object.entries(byStatus)
     .filter(([, v]) => v > 0)
@@ -14,7 +12,7 @@ export function SlideStateRail({ byStatus, total }: Props) {
     .map(([status, count]) => ({
       status,
       count,
-      color: hex[statusVariant(status)] ?? (theme === 'dark' ? '#64748b' : '#94a3b8'),
+      color: hex[statusVariant(status)] ?? '#64748b',
       pct: (count / total) * 100,
     }))
 
